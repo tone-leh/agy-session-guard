@@ -1842,7 +1842,9 @@ function buildPrismMigrationPlan({
   const thoughtCfg = thoughtRes.ok && thoughtRes.data && typeof thoughtRes.data === 'object' ? thoughtRes.data : {};
 
   const suggestedConfig = {
-    modules: {},
+    modules: {
+      quotaPulse: true,
+    },
   };
 
   if (mainCfg.hostLocalization !== undefined) {
