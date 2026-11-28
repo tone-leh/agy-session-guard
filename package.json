@@ -1,6 +1,6 @@
 {
   "name": "agy-sag",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "agy-Sag (Antigravity Superpower & Agent Guard) — Modular Zero-ASAR CDP deep-enhancement suite for Google Antigravity 2.0: 10-language native UI translation, auto /compact guard, prompt queue, draft vault, turn bookmarks, policy-gated auto-accept, optical theme studio, read-only quota pulse & storage doctor. Zero runtime dependencies, MIT licensed.",
   "license": "MIT",
   "type": "module",

@@ -16,6 +16,7 @@
   const RAIL_TESTID = 'ag-sag-rnav-rail';
   const OUTLINE_TESTID = 'ag-sag-rnav-outline';
   const MERMAID_MODAL_TESTID = 'ag-sag-mermaid-modal';
+  const OMNI_PILL_TESTID = 'ag-sag-omni-pill';
   const CODE_BAR_ATTR = 'data-ag-sag-code-bar';
   const CODE_FOLDED_ATTR = 'data-ag-sag-code-folded';
   const CODE_ENHANCED_ATTR = 'data-ag-sag-code-enhanced';
@@ -24,6 +25,50 @@
   const DEFAULT_COLLAPSE_LINES = 40;
   const MIN_COLLAPSE_LINES = 20;
   const MAX_COLLAPSE_LINES = 200;
+
+  const TRAILING_PUNCT_RE = /[.,;:!?'"`)\]}>。，；：！？》】）]+$/;
+  const URL_RE = /\bhttps?:\/\/[^\s<>'"`()[\]{}]+/gi;
+  const PATH_RE =
+    /(?:^|[\s([{"'：:，,（【「])((?:~\/|\.\.?\/)[A-Za-z0-9._@+\-\/\\~]+|[A-Za-z]:\\[^\s<>'"`|?*()[\]{}]+|\/[A-Za-z0-9._@+\-]+\/[A-Za-z0-9._@+\-\/~]*)/g;
+
+  function trimMatchedToken(raw) {
+    return String(raw || '').replace(TRAILING_PUNCT_RE, '').trim();
+  }
+
+  function extractPlainLinksAndPaths(text) {
+    const src = String(text || '');
+    if (!src.trim()) return [];
+    const found = [];
+    const seen = new Set();
+    let masked = src;
+
+    URL_RE.lastIndex = 0;
+    let m;
+    while ((m = URL_RE.exec(src)) !== null && found.length < 8) {
+      const raw = m[0];
+      const val = trimMatchedToken(raw);
+      if (!val || !/^https?:\/\/[^\s/]+/i.test(val)) continue;
+      if (!seen.has(val)) {
+        seen.add(val);
+        found.push({ type: 'url', value: val, raw, index: m.index });
+      }
+      masked = masked.slice(0, m.index) + ' '.repeat(raw.length) + masked.slice(m.index + raw.length);
+    }
+
+    PATH_RE.lastIndex = 0;
+    while ((m = PATH_RE.exec(masked)) !== null && found.length < 8) {
+      const candidate = m[1];
+      const val = trimMatchedToken(candidate);
+      if (!val || val.length < 3 || val === '//' || val.startsWith('//')) continue;
+      if (!seen.has(val)) {
+        seen.add(val);
+        found.push({ type: 'path', value: val, raw: candidate, index: m.index });
+      }
+    }
+
+    found.sort((a, b) => a.index - b.index);
+    return found.slice(0, 8).map(({ type, value, raw }) => ({ type, value, raw }));
+  }
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -90,10 +135,12 @@
     let outlineStarOnly = false;
     let mermaidModalEl = null;
     let mermaidZoomScale = 1;
+    let omniPillEl = null;
     let allFoldedToggleState = true;
     let createdStyleEl = null;
     let keydownOff = null;
     let paneTrackOff = null;
+    let omniOff = null;
     let domObserver = null;
     let domBusUnsub = null;
     let observerTimer = null;
@@ -110,17 +157,20 @@
     const modifiedDetails = new Set(); // track modified host <details> for lossless restore
     let lastRailSig = '';
 
-    const safeInsert = (parent, node, ref) => {
-      if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
-      try {
-        if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') parent.insertBefore(node, ref);
-        else parent?.appendChild?.(node);
-        return true;
-      } catch { return false; }
+    const safeInsert = (p, n, r) => (typeof coexist?.safeInsertBefore === 'function' ? coexist.safeInsertBefore(p, n, r) : (() => { try { r && r.parentElement === p && typeof p.insertBefore === 'function' ? p.insertBefore(n, r) : p?.appendChild?.(n); return true; } catch { return false; } })());
+    const safeRemove = (n) => (typeof coexist?.safeRemoveNode === 'function' ? coexist.safeRemoveNode(n) : (() => { try { n?.remove?.(); return true; } catch { return false; } })());
+    const mk = (tag, cls, txt, attrs, owned) => {
+      const e = owned && coexist?.markOwnedNoTranslate ? coexist.markOwnedNoTranslate(doc.createElement(tag)) : doc.createElement(tag);
+      if (cls) e.className = cls;
+      if (txt !== undefined) e.textContent = txt;
+      if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      return e;
     };
-    const safeRemove = (node) => {
-      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
-      try { node?.remove?.(); return true; } catch { return false; }
+    const mkBtn = (cls, txt, attrs, fn, stop) => {
+      const b = mk('button', cls, txt, attrs);
+      b.type = 'button';
+      if (fn) b.addEventListener('click', stop ? (ev) => { ev?.preventDefault?.(); ev?.stopPropagation?.(); fn(ev); } : fn);
+      return b;
     };
 
     const pruneDetachedDetails = () => {
@@ -207,6 +257,13 @@
       }
     }
 
+    function getScrollBehavior() {
+      try {
+        if (win?.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return 'auto';
+      } catch {}
+      return 'smooth';
+    }
+
     function jumpToTurn(index) {
       if (destroyed || !enabled) return false;
       const turns = getUserTurnElements();
@@ -218,7 +275,7 @@
       currentTurnIndex = clamped;
       clearPulse();
       try {
-        target.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+        target.scrollIntoView?.({ behavior: getScrollBehavior(), block: 'center' });
       } catch {}
       try {
         target.setAttribute?.('data-ag-sg-pulse', '1');
@@ -251,11 +308,12 @@
 
     function copyCodeText(text, btn) {
       const str = String(text || '');
+      const origLabel = btn && typeof btn.textContent === 'string' && btn.textContent ? btn.textContent : t('rnavCopyBtn', 'Copy');
       const show = (ok) => {
         if (!btn || destroyed || btn.isConnected === false) return;
         btn.textContent = ok ? t('rnavCopiedBtn', 'Copied ✓') : t('rnavCopyFailedBtn', 'Copy failed');
         const tm = setTimeout(() => {
-          if (!destroyed && btn.isConnected !== false) btn.textContent = t('rnavCopyBtn', 'Copy');
+          if (!destroyed && btn.isConnected !== false) btn.textContent = origLabel;
         }, 1200);
         tm?.unref?.();
       };
@@ -414,68 +472,22 @@
           curEnhanced += 1;
           let bar = codeBars.get(pre) || null;
           if (!bar || bar.isConnected === false) {
-            bar = coexist?.markOwnedNoTranslate
-              ? coexist.markOwnedNoTranslate(doc.createElement('div'))
-              : doc.createElement('div');
-            bar.className = 'ag-sag-code-bar';
-            bar.setAttribute(CODE_BAR_ATTR, '1');
-
-            const meta = doc.createElement('span');
-            meta.className = 'ag-sag-code-meta';
-            meta.setAttribute('data-ag-sag-code-meta', '1');
-
-            const acts = doc.createElement('div');
-            acts.className = 'ag-sag-code-acts';
-
-            const toggleBtn = doc.createElement('button');
-            toggleBtn.type = 'button';
-            toggleBtn.className = 'ag-sag-code-btn';
-            toggleBtn.setAttribute('data-ag-sag-code-toggle', '1');
-            toggleBtn.addEventListener('click', (ev) => {
-              ev?.preventDefault?.();
-              ev?.stopPropagation?.();
-              togglePreWithScrollCompensation(pre, bar);
-            });
-
-            const wrapBtn = doc.createElement('button');
-            wrapBtn.type = 'button';
-            wrapBtn.className = 'ag-sag-code-btn';
-            wrapBtn.setAttribute('data-ag-sag-code-wrap-btn', '1');
-            wrapBtn.setAttribute('aria-pressed', 'false');
-            wrapBtn.textContent = t('rnavWrapBtn', 'Wrap');
-            wrapBtn.addEventListener('click', (ev) => {
-              ev?.preventDefault?.();
-              ev?.stopPropagation?.();
-              const wrapped = pre.getAttribute?.(CODE_WRAP_ATTR) === '1';
-              if (wrapped) {
-                pre.removeAttribute?.(CODE_WRAP_ATTR);
-                wrapBtn.setAttribute('aria-pressed', 'false');
-              } else {
-                pre.setAttribute?.(CODE_WRAP_ATTR, '1');
-                wrapBtn.setAttribute('aria-pressed', 'true');
-              }
-            });
-
-            const copyBtn = doc.createElement('button');
-            copyBtn.type = 'button';
-            copyBtn.className = 'ag-sag-code-btn';
-            copyBtn.setAttribute('data-ag-sag-code-copy', '1');
-            copyBtn.textContent = t('rnavCopyBtn', 'Copy');
-            copyBtn.addEventListener('click', (ev) => {
-              ev?.preventDefault?.();
-              ev?.stopPropagation?.();
-              copyCodeText(extractCodeCopyText(pre), copyBtn);
-            });
-
+            bar = mk('div', 'ag-sag-code-bar', undefined, { [CODE_BAR_ATTR]: '1' }, true);
+            const meta = mk('span', 'ag-sag-code-meta', undefined, { 'data-ag-sag-code-meta': '1' });
+            const acts = mk('div', 'ag-sag-code-acts');
+            const toggleBtn = mkBtn('ag-sag-code-btn', undefined, { 'data-ag-sag-code-toggle': '1' }, () => togglePreWithScrollCompensation(pre, bar), true);
+            const wrapBtn = mkBtn('ag-sag-code-btn', t('rnavWrapBtn', 'Wrap'), { 'data-ag-sag-code-wrap-btn': '1', 'aria-pressed': 'false' }, () => {
+              const w = pre.getAttribute?.(CODE_WRAP_ATTR) === '1';
+              w ? pre.removeAttribute?.(CODE_WRAP_ATTR) : pre.setAttribute?.(CODE_WRAP_ATTR, '1');
+              wrapBtn.setAttribute('aria-pressed', String(!w));
+            }, true);
+            const copyBtn = mkBtn('ag-sag-code-btn', t('rnavCopyBtn', 'Copy'), { 'data-ag-sag-code-copy': '1' }, () => copyCodeText(extractCodeCopyText(pre), copyBtn), true);
             acts.appendChild(toggleBtn);
             acts.appendChild(wrapBtn);
             acts.appendChild(copyBtn);
             bar.appendChild(meta);
             bar.appendChild(acts);
-
-            if (pre.parentElement) {
-              safeInsert(pre.parentElement, bar, pre);
-            }
+            if (pre.parentElement) safeInsert(pre.parentElement, bar, pre);
             codeBars.set(pre, bar);
             enhancedPres.add(pre);
             pre.setAttribute?.(CODE_ENHANCED_ATTR, '1');
@@ -505,6 +517,21 @@
       }
     }
 
+    function syncFoldButtonsUi() {
+      const railFoldBtn = railEl?.querySelector?.('[data-ag-sag-rnav-act="fold-all"]');
+      if (railFoldBtn) {
+        railFoldBtn.textContent = allFoldedToggleState ? '⊞' : '⊟';
+        railFoldBtn.setAttribute?.('aria-pressed', String(allFoldedToggleState));
+      }
+      const outFoldBtn = outlineEl?.querySelector?.('[data-testid="ag-sag-rnav-outline-fold"]');
+      if (outFoldBtn) {
+        outFoldBtn.textContent = allFoldedToggleState
+          ? t('rnavExpandStepsBtn', '⊞ Expand Steps')
+          : t('rnavFoldStepsBtn', '⊟ Fold Steps');
+        outFoldBtn.setAttribute?.('aria-pressed', String(allFoldedToggleState));
+      }
+    }
+
     function toggleFoldAllStepsAndCode(forceFold = null) {
       const targetFold = typeof forceFold === 'boolean' ? forceFold : !allFoldedToggleState;
       allFoldedToggleState = targetFold;
@@ -516,6 +543,7 @@
       }
       recountFolded();
       const conv = getConversationContainer();
+      let toggledSteps = 0;
       if (conv && typeof conv.querySelectorAll === 'function') {
         const detailsList = conv.querySelectorAll('details') || [];
         for (const det of detailsList) {
@@ -526,10 +554,24 @@
             }
             modifiedDetails.add(det);
             det.open = !targetFold;
+            toggledSteps += 1;
           } catch {}
         }
+        const triggers =
+          conv.querySelectorAll('[data-testid="thinking-collapsible-trigger"], [data-testid="tool-call-collapsible-trigger"]') || [];
+        for (const trig of triggers) {
+          if (isOwnedNode(trig)) continue;
+          const exp = trig.getAttribute?.('aria-expanded');
+          if ((targetFold && exp === 'true') || (!targetFold && exp === 'false')) {
+            try {
+              trig.click?.();
+              toggledSteps += 1;
+            } catch {}
+          }
+        }
       }
-      return { folded: targetFold, foldedCodeBlocks: foldedCount };
+      syncFoldButtonsUi();
+      return { folded: targetFold, foldedCodeBlocks: foldedCount, toggledSteps };
     }
 
     function closeMermaidModal() {
@@ -544,85 +586,50 @@
       ensureStyle();
       mermaidZoomScale = 1;
 
-      const overlay = coexist?.markOwnedNoTranslate
-        ? coexist.markOwnedNoTranslate(doc.createElement('div'))
-        : doc.createElement('div');
-      overlay.className = 'ag-sag-mermaid-modal';
-      overlay.setAttribute('data-testid', MERMAID_MODAL_TESTID);
-      overlay.setAttribute('role', 'dialog');
-      overlay.addEventListener('click', (ev) => {
-        if (ev?.target === overlay) closeMermaidModal();
-      });
-
-      const box = doc.createElement('div');
-      box.className = 'ag-sag-mermaid-box';
-
-      const head = doc.createElement('div');
-      head.className = 'ag-sag-mermaid-head';
-      const ttl = doc.createElement('strong');
-      ttl.textContent = t('rnavMermaidZoom', 'Mermaid Diagram');
-
-      const ctrls = doc.createElement('div');
-      ctrls.className = 'ag-sag-code-acts';
-
-      const stage = doc.createElement('div');
-      stage.className = 'ag-sag-mermaid-stage';
-      const canvas = doc.createElement('div');
-      canvas.className = 'ag-sag-mermaid-canvas';
+      const overlay = mk('div', 'ag-sag-mermaid-modal', undefined, { 'data-testid': MERMAID_MODAL_TESTID, role: 'dialog' }, true);
+      overlay.addEventListener('click', (ev) => { if (ev?.target === overlay) closeMermaidModal(); });
+      const box = mk('div', 'ag-sag-mermaid-box');
+      const head = mk('div', 'ag-sag-mermaid-head');
+      const ttl = mk('strong', null, t('rnavMermaidZoom', 'Mermaid Diagram'));
+      const ctrls = mk('div', 'ag-sag-code-acts');
+      const stage = mk('div', 'ag-sag-mermaid-stage');
+      const canvas = mk('div', 'ag-sag-mermaid-canvas');
       const cloned = typeof svgEl.cloneNode === 'function' ? svgEl.cloneNode(true) : null;
       if (cloned) canvas.appendChild(cloned);
       stage.appendChild(canvas);
 
+      const scaleLbl = mk('span', 'ag-sag-code-meta', '100%');
       const applyScale = (next) => {
         mermaidZoomScale = Math.max(0.5, Math.min(3, Math.round(next * 100) / 100));
         if (canvas.style) canvas.style.transform = `scale(${mermaidZoomScale})`;
         scaleLbl.textContent = `${Math.round(mermaidZoomScale * 100)}%`;
       };
+      const mBtn = (txt, act, fn) => mkBtn('ag-sag-code-btn', txt, { 'data-ag-sag-mermaid-act': act }, fn, true);
 
-      const mkBtn = (txt, act, fn) => {
-        const b = doc.createElement('button');
-        b.type = 'button';
-        b.className = 'ag-sag-code-btn';
-        b.setAttribute('data-ag-sag-mermaid-act', act);
-        b.textContent = txt;
-        b.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          fn();
-        });
-        return b;
-      };
-      const scaleLbl = doc.createElement('span');
-      scaleLbl.className = 'ag-sag-code-meta';
-      scaleLbl.textContent = '100%';
-
-      ctrls.appendChild(mkBtn('-', 'zoom-out', () => applyScale(mermaidZoomScale - 0.25)));
+      ctrls.appendChild(mBtn('-', 'zoom-out', () => applyScale(mermaidZoomScale - 0.25)));
       ctrls.appendChild(scaleLbl);
-      ctrls.appendChild(mkBtn('+', 'zoom-in', () => applyScale(mermaidZoomScale + 0.25)));
-      ctrls.appendChild(mkBtn('100%', 'zoom-reset', () => applyScale(1)));
-      ctrls.appendChild(
-        mkBtn(t('rnavMermaidExportSvg', 'Download SVG'), 'export-svg', () => {
-          try {
-            const Serializer = win?.XMLSerializer || globalThis.XMLSerializer;
-            const rawSvg = Serializer ? new Serializer().serializeToString(svgEl) : String(svgEl.outerHTML || '');
-            if (!rawSvg) return;
-            const BlobCtor = win?.Blob || globalThis.Blob;
-            const UrlApi = win?.URL || globalThis.URL;
-            if (!BlobCtor || !UrlApi?.createObjectURL) return;
-            const url = UrlApi.createObjectURL(new BlobCtor([rawSvg], { type: 'image/svg+xml;charset=utf-8' }));
-            const a = coexist?.markOwnedNoTranslate ? coexist.markOwnedNoTranslate(doc.createElement('a')) : doc.createElement('a');
-            a.href = url;
-            a.download = 'mermaid-diagram.svg';
-            if (a.style) a.style.display = 'none';
-            doc.body.appendChild(a);
-            a.click?.();
-            safeRemove(a);
-            const timer = setTimeout(() => { try { UrlApi.revokeObjectURL?.(url); } catch {} }, 1000);
-            timer?.unref?.();
-          } catch {}
-        })
-      );
-      ctrls.appendChild(mkBtn(t('rnavClose', 'Close'), 'close', closeMermaidModal));
+      ctrls.appendChild(mBtn('+', 'zoom-in', () => applyScale(mermaidZoomScale + 0.25)));
+      ctrls.appendChild(mBtn('100%', 'zoom-reset', () => applyScale(1)));
+      ctrls.appendChild(mBtn(t('rnavMermaidExportSvg', 'Download SVG'), 'export-svg', () => {
+        try {
+          const Serializer = win?.XMLSerializer || globalThis.XMLSerializer;
+          const rawSvg = Serializer ? new Serializer().serializeToString(svgEl) : String(svgEl.outerHTML || '');
+          const BlobCtor = win?.Blob || globalThis.Blob;
+          const UrlApi = win?.URL || globalThis.URL;
+          if (!rawSvg || !BlobCtor || !UrlApi?.createObjectURL) return;
+          const url = UrlApi.createObjectURL(new BlobCtor([rawSvg], { type: 'image/svg+xml;charset=utf-8' }));
+          const a = mk('a', null, undefined, null, true);
+          a.href = url;
+          a.download = 'mermaid-diagram.svg';
+          if (a.style) a.style.display = 'none';
+          doc.body.appendChild(a);
+          a.click?.();
+          safeRemove(a);
+          const tm = setTimeout(() => { try { UrlApi.revokeObjectURL?.(url); } catch {} }, 1000);
+          tm?.unref?.();
+        } catch {}
+      }));
+      ctrls.appendChild(mBtn(t('rnavClose', 'Close'), 'close', closeMermaidModal));
 
       head.appendChild(ttl);
       head.appendChild(ctrls);
@@ -665,23 +672,12 @@
           count += 1;
           const existing = mermaidBtns.get(svg);
           if (existing && existing.isConnected !== false) continue;
-          const btn = coexist?.markOwnedNoTranslate
-            ? coexist.markOwnedNoTranslate(doc.createElement('button'))
-            : doc.createElement('button');
+          const zTitle = t('rnavMermaidZoom', 'Zoom Mermaid Diagram');
+          const btn = mk('button', 'ag-sag-code-btn ag-sag-mermaid-btn', '⤢', { [MERMAID_BTN_ATTR]: '1', 'aria-label': zTitle }, true);
           btn.type = 'button';
-          btn.className = 'ag-sag-code-btn ag-sag-mermaid-btn';
-          btn.setAttribute(MERMAID_BTN_ATTR, '1');
-          btn.textContent = '⤢';
-          btn.title = t('rnavMermaidZoom', 'Zoom Mermaid Diagram');
-          btn.setAttribute('aria-label', btn.title);
-          btn.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            openMermaidZoom(svg);
-          });
-          if (svg.parentElement) {
-            safeInsert(svg.parentElement, btn, svg);
-          }
+          btn.title = zTitle;
+          btn.addEventListener('click', (ev) => { ev?.preventDefault?.(); ev?.stopPropagation?.(); openMermaidZoom(svg); });
+          if (svg.parentElement) safeInsert(svg.parentElement, btn, svg);
           mermaidBtns.set(svg, btn);
         }
       }
@@ -734,13 +730,9 @@
 
       if (!inp || !listBox) {
         while (outlineEl.firstChild) outlineEl.removeChild(outlineEl.firstChild);
-        const head = doc.createElement('div');
-        head.className = 'ag-sag-rnav-outline-head';
-
-        inp = doc.createElement('input');
+        const head = mk('div', 'ag-sag-rnav-outline-head');
+        inp = mk('input', 'ag-sag-search-input', undefined, { 'data-testid': 'ag-sag-rnav-outline-input' });
         inp.type = 'search';
-        inp.className = 'ag-sag-search-input';
-        inp.setAttribute('data-testid', 'ag-sag-rnav-outline-input');
         inp.placeholder = t('rnavOutlinePlaceholder', 'Filter turns (Enter to jump)…');
         inp.value = outlineQuery;
         inp.addEventListener('input', () => {
@@ -748,49 +740,32 @@
           populateOutlineList(listBox, getUserTurnElements(), getStarredTurnSet());
         });
         inp.addEventListener('keydown', (ev) => {
-          if (ev?.key === 'Escape') {
-            ev.preventDefault?.();
-            removeOutline();
-            return;
-          }
+          if (ev?.key === 'Escape') { ev.preventDefault?.(); removeOutline(); return; }
           if (ev?.key === 'Enter') {
             ev.preventDefault?.();
             const firstItem = listBox.querySelector?.('[data-ag-sag-outline-idx]');
-            if (firstItem) {
-              const idx = Number(firstItem.getAttribute('data-ag-sag-outline-idx'));
-              if (Number.isFinite(idx)) {
-                jumpToTurn(idx);
-                removeOutline();
-              }
-            }
+            const idx = firstItem ? Number(firstItem.getAttribute('data-ag-sag-outline-idx')) : NaN;
+            if (Number.isFinite(idx)) { jumpToTurn(idx); removeOutline(); }
           }
         });
 
-        starBtn = doc.createElement('button');
-        starBtn.type = 'button';
-        starBtn.className = 'ag-sag-code-btn';
-        starBtn.setAttribute('data-testid', 'ag-sag-rnav-outline-star');
-        starBtn.addEventListener('click', () => {
+        starBtn = mkBtn('ag-sag-code-btn', undefined, { 'data-testid': 'ag-sag-rnav-outline-star' }, () => {
           outlineStarOnly = !outlineStarOnly;
           starBtn.setAttribute('aria-pressed', String(outlineStarOnly));
           populateOutlineList(listBox, getUserTurnElements(), getStarredTurnSet());
         });
-
-        const closeBtn = doc.createElement('button');
-        closeBtn.type = 'button';
-        closeBtn.className = 'ag-sag-code-btn';
-        closeBtn.textContent = '×';
+        const foldStepsBtn = mkBtn('ag-sag-code-btn', undefined, { 'data-testid': 'ag-sag-rnav-outline-fold' }, () => toggleFoldAllStepsAndCode());
+        foldStepsBtn.title = t('rnavFoldAllBtn', 'Toggle fold all code blocks & steps');
+        const closeBtn = mkBtn('ag-sag-code-btn', '×', null, removeOutline);
         closeBtn.title = t('rnavClose', 'Close');
-        closeBtn.addEventListener('click', () => removeOutline());
 
         head.appendChild(inp);
         head.appendChild(starBtn);
+        head.appendChild(foldStepsBtn);
         head.appendChild(closeBtn);
         outlineEl.appendChild(head);
 
-        listBox = doc.createElement('div');
-        listBox.className = 'ag-sag-rnav-outline-list';
-        listBox.setAttribute('data-testid', 'ag-sag-rnav-outline-list');
+        listBox = mk('div', 'ag-sag-rnav-outline-list', undefined, { 'data-testid': 'ag-sag-rnav-outline-list' });
         outlineEl.appendChild(listBox);
       }
 
@@ -798,6 +773,7 @@
         starBtn.textContent = `★ ${t('rnavOutlineStarOnly', 'Starred')}`;
         starBtn.setAttribute('aria-pressed', String(outlineStarOnly));
       }
+      syncFoldButtonsUi();
       populateOutlineList(listBox, turns, starred);
       if (focusInput) {
         try { inp?.focus?.(); } catch {}
@@ -808,6 +784,8 @@
       if (!listBox) return;
       while (listBox.firstChild) listBox.removeChild(listBox.firstChild);
       const q = String(outlineQuery || '').trim().toLowerCase();
+      const useChapters = turns.length >= 15;
+      let lastChapter = -1;
       let matched = 0;
       for (let i = 0; i < turns.length; i += 1) {
         const turnNum = i + 1;
@@ -816,6 +794,18 @@
         const rawText = String(turns[i]?.textContent || '').replace(/\s+/g, ' ').trim();
         if (q && !rawText.toLowerCase().includes(q) && !`#${turnNum}`.includes(q)) continue;
         matched += 1;
+        if (useChapters) {
+          const chapStart = Math.floor(i / 10) * 10 + 1;
+          if (chapStart !== lastChapter) {
+            lastChapter = chapStart;
+            const chapEnd = Math.min(chapStart + 9, turns.length);
+            const hdr = doc.createElement('div');
+            hdr.className = 'ag-sag-rnav-outline-chapter';
+            hdr.setAttribute('data-ag-sag-outline-chapter', `§${chapStart}`);
+            hdr.textContent = `§${chapStart} · #${chapStart}–#${chapEnd}`;
+            listBox.appendChild(hdr);
+          }
+        }
         const row = doc.createElement('button');
         row.type = 'button';
         row.className = 'ag-sag-rnav-outline-item';
@@ -920,75 +910,42 @@
       lastRailSig = railSig;
       while (railEl.firstChild) railEl.removeChild(railEl.firstChild);
 
-      const outlineBtn = doc.createElement('button');
-      outlineBtn.type = 'button';
-      outlineBtn.className = 'ag-sag-rnav-step';
-      outlineBtn.setAttribute('data-ag-sag-rnav-act', 'outline');
-      outlineBtn.textContent = '☰';
-      outlineBtn.title = t('rnavOutlineBtn', 'Search Outline (Alt+F)');
-      outlineBtn.addEventListener('click', () => {
-        outlineOpen = !outlineOpen;
-        renderOutlinePopover(outlineOpen);
-      });
-      railEl.appendChild(outlineBtn);
+      const addStep = (txt, title, attrs, fn) => {
+        const b = mkBtn('ag-sag-rnav-step', txt, attrs, fn);
+        b.title = title;
+        railEl.appendChild(b);
+      };
+      addStep('☰', t('rnavOutlineBtn', 'Search Outline (Alt+F)'), { 'data-ag-sag-rnav-act': 'outline' }, () => { outlineOpen = !outlineOpen; renderOutlinePopover(outlineOpen); });
+      addStep(allFoldedToggleState ? '⊞' : '⊟', t('rnavFoldAllBtn', 'Toggle fold all code blocks & steps'), { 'data-ag-sag-rnav-act': 'fold-all', 'aria-pressed': allFoldedToggleState }, () => toggleFoldAllStepsAndCode());
+      addStep('↑', t('rnavPrevTip', 'Previous turn (Alt+↑)'), { 'data-ag-sag-rnav-step': 'prev' }, () => jumpRelative(-1));
 
-      const foldAllBtn = doc.createElement('button');
-      foldAllBtn.type = 'button';
-      foldAllBtn.className = 'ag-sag-rnav-step';
-      foldAllBtn.setAttribute('data-ag-sag-rnav-act', 'fold-all');
-      foldAllBtn.textContent = '⊟';
-      foldAllBtn.title = t('rnavFoldAllBtn', 'Toggle fold all code blocks & steps');
-      foldAllBtn.addEventListener('click', () => {
-        toggleFoldAllStepsAndCode();
-      });
-      railEl.appendChild(foldAllBtn);
-
-      const prevBtn = doc.createElement('button');
-      prevBtn.type = 'button';
-      prevBtn.className = 'ag-sag-rnav-step';
-      prevBtn.setAttribute('data-ag-sag-rnav-step', 'prev');
-      prevBtn.textContent = '↑';
-      prevBtn.title = t('rnavPrevTip', 'Previous turn (Alt+↑)');
-      prevBtn.addEventListener('click', () => jumpRelative(-1));
-      railEl.appendChild(prevBtn);
-
-      const dotsWrap = doc.createElement('div');
-      dotsWrap.className = 'ag-sag-rnav-dots';
+      const dotsWrap = mk('div', 'ag-sag-rnav-dots');
+      const showChapters = turns.length >= 15;
+      let chapterTicksInserted = 0;
       const dotIndices = sampleRailIndices(turns.length, currentTurnIndex, starred);
       for (let d = 0; d < dotIndices.length; d += 1) {
         const i = dotIndices[d];
         const turnNum = i + 1;
+        const isChapterStart = showChapters && (turnNum - 1) % 10 === 0;
+        const chapLabel = isChapterStart ? `§${turnNum}` : '';
+        if (isChapterStart && chapterTicksInserted < 12) {
+          dotsWrap.appendChild(mk('span', 'ag-sag-rnav-chapter', chapLabel, { 'data-ag-sag-rnav-chapter': chapLabel, 'aria-hidden': 'true' }));
+          chapterTicksInserted += 1;
+        }
         const snippet = String(turns[i]?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 64);
-        const dot = doc.createElement('button');
-        dot.type = 'button';
-        dot.className = 'ag-sag-rnav-dot';
-        dot.setAttribute('data-ag-sag-rnav-turn', String(turnNum));
-        if (starred.has(turnNum)) dot.setAttribute('data-starred', '1');
-        if (i === currentTurnIndex) dot.setAttribute('data-active', '1');
-        dot.title = `#${turnNum}${starred.has(turnNum) ? ' ★' : ''}: ${snippet}`;
-        dot.setAttribute('aria-label', dot.title);
-        dot.addEventListener('click', () => jumpToTurn(i));
+        const title = `${chapLabel ? `${chapLabel} · ` : ''}#${turnNum}${starred.has(turnNum) ? ' ★' : ''}: ${snippet}`;
+        const attrs = { 'data-ag-sag-rnav-turn': turnNum, 'aria-label': title };
+        if (isChapterStart) attrs['data-ag-sag-chapter'] = chapLabel;
+        if (starred.has(turnNum)) attrs['data-starred'] = '1';
+        if (i === currentTurnIndex) attrs['data-active'] = '1';
+        const dot = mkBtn('ag-sag-rnav-dot', undefined, attrs, () => jumpToTurn(i));
+        dot.title = title;
         dotsWrap.appendChild(dot);
       }
       railEl.appendChild(dotsWrap);
 
-      const nextBtn = doc.createElement('button');
-      nextBtn.type = 'button';
-      nextBtn.className = 'ag-sag-rnav-step';
-      nextBtn.setAttribute('data-ag-sag-rnav-step', 'next');
-      nextBtn.textContent = '↓';
-      nextBtn.title = t('rnavNextTip', 'Next turn (Alt+↓)');
-      nextBtn.addEventListener('click', () => jumpRelative(1));
-      railEl.appendChild(nextBtn);
-
-      const bottomBtn = doc.createElement('button');
-      bottomBtn.type = 'button';
-      bottomBtn.className = 'ag-sag-rnav-step';
-      bottomBtn.setAttribute('data-ag-sag-rnav-step', 'bottom');
-      bottomBtn.textContent = '⤓';
-      bottomBtn.title = t('rnavBottomTip', 'Scroll to bottom');
-      bottomBtn.addEventListener('click', () => scrollToBottom());
-      railEl.appendChild(bottomBtn);
+      addStep('↓', t('rnavNextTip', 'Next turn (Alt+↓)'), { 'data-ag-sag-rnav-step': 'next' }, () => jumpRelative(1));
+      addStep('⤓', t('rnavBottomTip', 'Scroll to bottom'), { 'data-ag-sag-rnav-step': 'bottom' }, () => scrollToBottom());
 
       if (outlineOpen) renderOutlinePopover(false);
     }
@@ -1038,7 +995,7 @@
       const targetTop = Math.max(0, Number(vp.scrollHeight) || 0);
       if (typeof vp.scrollTo === 'function') {
         try {
-          vp.scrollTo({ top: targetTop, behavior: 'smooth' });
+          vp.scrollTo({ top: targetTop, behavior: getScrollBehavior() });
           return true;
         } catch {}
       }
@@ -1050,10 +1007,153 @@
       }
     }
 
+    function removeOmniPill() {
+      safeRemove(omniPillEl);
+      omniPillEl = null;
+      if (doc && typeof doc.querySelectorAll === 'function') {
+        try {
+          doc.querySelectorAll(`[data-testid="${OMNI_PILL_TESTID}"]`).forEach((n) => safeRemove(n));
+        } catch {}
+      }
+    }
+
+    function openExternalUrlSafe(url) {
+      const clean = String(url || '').trim();
+      if (!/^https?:\/\//i.test(clean)) return false;
+      try {
+        if (typeof win?.open === 'function') {
+          win.open(clean, '_blank', 'noopener,noreferrer');
+          return true;
+        }
+      } catch {}
+      try {
+        if (doc?.body && typeof doc.createElement === 'function') {
+          const a = coexist?.markOwnedNoTranslate ? coexist.markOwnedNoTranslate(doc.createElement('a')) : doc.createElement('a');
+          a.href = clean;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          if (a.style) a.style.display = 'none';
+          doc.body.appendChild(a);
+          a.click?.();
+          safeRemove(a);
+          return true;
+        }
+      } catch {}
+      return false;
+    }
+
+    function renderOmniPill(items, anchorEv = null, anchorEl = null) {
+      if (destroyed || !enabled || !doc?.body || !Array.isArray(items) || items.length === 0) {
+        removeOmniPill();
+        return false;
+      }
+      removeOmniPill();
+      ensureStyle();
+
+      const pill = mk('div', 'ag-sag-omni-pill', undefined, {
+        'data-ag-sg-owned': '1',
+        'data-ag-sag-owned': '1',
+        'data-ag-no-i18n': '1',
+        'data-testid': OMNI_PILL_TESTID,
+        role: 'toolbar',
+      }, true);
+      const primary = items[0];
+      const preview = mk('span', 'ag-sag-code-meta', primary.value.length > 44 ? `${primary.value.slice(0, 41)}…` : primary.value);
+      preview.title = primary.value;
+      pill.appendChild(preview);
+      if (primary.type === 'url') {
+        pill.appendChild(mkBtn('ag-sag-code-btn', t('rnavOpenLinkBtn', 'Open Link'), { 'data-ag-sag-omni-act': 'open-url' }, () => { openExternalUrlSafe(primary.value); removeOmniPill(); }, true));
+      }
+      const copyBtn = mkBtn(
+        'ag-sag-code-btn',
+        primary.type === 'path' ? t('rnavCopyPathBtn', 'Copy Path') : t('rnavCopyBtn', 'Copy'),
+        { 'data-ag-sag-omni-act': primary.type === 'path' ? 'copy-path' : 'copy-url' },
+        () => copyCodeText(primary.value, copyBtn),
+        true
+      );
+      pill.appendChild(copyBtn);
+      const closeBtn = mkBtn('ag-sag-code-btn', '×', { 'data-ag-sag-omni-act': 'close' }, removeOmniPill, true);
+      closeBtn.title = t('rnavClose', 'Close');
+      pill.appendChild(closeBtn);
+
+      if (pill.style) {
+        const vw = Number(win?.innerWidth) || 1200;
+        const vh = Number(win?.innerHeight) || 800;
+        const rect = typeof anchorEl?.getBoundingClientRect === 'function' ? anchorEl.getBoundingClientRect() : null;
+        const rawX = Number.isFinite(anchorEv?.clientX) ? anchorEv.clientX : rect ? rect.left + 12 : 24;
+        const rawY = Number.isFinite(anchorEv?.clientY) ? anchorEv.clientY - 40 : rect ? rect.top - 36 : 24;
+        Object.assign(pill.style, {
+          position: 'fixed',
+          left: `${Math.max(12, Math.min(vw - 260, Math.round(rawX)))}px`,
+          top: `${Math.max(12, Math.min(vh - 48, Math.round(rawY)))}px`,
+          zIndex: '2147483050',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '4px 8px',
+          borderRadius: '999px',
+          border: '1px solid var(--border,rgba(148,163,184,0.3))',
+          background: 'var(--popover,var(--card,#18181f))',
+          color: 'var(--foreground,#f2f2f5)',
+          boxShadow: '0 8px 24px -8px rgba(0,0,0,0.45)',
+        });
+      }
+
+      doc.body.appendChild(pill);
+      omniPillEl = pill;
+      return true;
+    }
+
+    function handleConversationTextAction(ev) {
+      if (destroyed || !enabled || !doc) return;
+      const target = ev?.target;
+      if (!target || target.nodeType !== 1) return;
+      if (omniPillEl && (target === omniPillEl || omniPillEl.contains?.(target) || target.closest?.(`[data-testid="${OMNI_PILL_TESTID}"]`))) {
+        return;
+      }
+      if (isOwnedNode(target) || isEditableTarget(target)) {
+        removeOmniPill();
+        return;
+      }
+      if (target.closest?.('a, button')) {
+        removeOmniPill();
+        return;
+      }
+      const msgHost = target.closest?.(
+        '[data-testid="agent-response"], [data-testid="planner-response-text"], [data-testid="user-message-bubble"]'
+      );
+      if (!msgHost) return;
+
+      let candidate = '';
+      try {
+        const sel = typeof win?.getSelection === 'function' ? win.getSelection() : typeof doc?.getSelection === 'function' ? doc.getSelection() : null;
+        const selText = String(sel?.toString?.() || '').trim();
+        if (selText && selText.length <= 2000) candidate = selText;
+      } catch {}
+
+      if (!candidate && ev?.type === 'click') {
+        const elText = String(target.textContent || '').trim();
+        if (elText.length > 0 && elText.length <= 280) candidate = elText;
+      }
+
+      if (!candidate) return;
+      const hits = extractPlainLinksAndPaths(candidate);
+      if (hits.length > 0) {
+        renderOmniPill(hits, ev, target);
+      } else {
+        removeOmniPill();
+      }
+    }
+
     function onKeyDown(ev) {
       if (destroyed || !enabled) return;
       const key = String(ev?.key || '');
       if (key === 'Escape') {
+        if (omniPillEl) {
+          removeOmniPill();
+          ev.preventDefault?.();
+          return;
+        }
         if (mermaidModalEl) {
           closeMermaidModal();
           ev.preventDefault?.();
@@ -1124,6 +1224,25 @@
         };
       }
 
+      if (!omniOff) {
+        const onOutsidePointer = (ev) => {
+          if (!omniPillEl || destroyed) return;
+          const tgt = ev?.target;
+          if (tgt && (tgt === omniPillEl || omniPillEl.contains?.(tgt) || tgt.closest?.(`[data-testid="${OMNI_PILL_TESTID}"]`))) {
+            return;
+          }
+          removeOmniPill();
+        };
+        doc.addEventListener?.('pointerdown', onOutsidePointer, true);
+        doc.addEventListener?.('mouseup', handleConversationTextAction, false);
+        doc.addEventListener?.('click', handleConversationTextAction, false);
+        omniOff = () => {
+          doc.removeEventListener?.('pointerdown', onOutsidePointer, true);
+          doc.removeEventListener?.('mouseup', handleConversationTextAction, false);
+          doc.removeEventListener?.('click', handleConversationTextAction, false);
+        };
+      }
+
       if (options.autoObserve !== false && doc.body) {
         const bus = coexist?.getDomMutationBus?.(doc, win);
         if (bus && typeof bus.subscribe === 'function') {
@@ -1184,6 +1303,10 @@
         try { paneTrackOff(); } catch {}
         paneTrackOff = null;
       }
+      if (omniOff) {
+        try { omniOff(); } catch {}
+        omniOff = null;
+      }
       if (domBusUnsub) {
         try { domBusUnsub(); } catch {}
         domBusUnsub = null;
@@ -1197,6 +1320,7 @@
     function sync() {
       if (destroyed) return;
       if (!enabled) {
+        removeOmniPill();
         restoreModifiedDetails();
         cleanupEnhancedCodeBlocks();
         cleanupMermaidButtons();
@@ -1222,6 +1346,7 @@
       } else {
         detachListeners();
         clearPulse();
+        removeOmniPill();
         restoreModifiedDetails();
         cleanupEnhancedCodeBlocks();
         cleanupMermaidButtons();
@@ -1246,6 +1371,7 @@
         mermaidCount: mermaidBtns.size,
         mermaidModalOpen: Boolean(mermaidModalEl && mermaidModalEl.isConnected !== false),
         outlineOpen: Boolean(outlineOpen && outlineEl && outlineEl.isConnected !== false),
+        omniPillOpen: Boolean(omniPillEl && omniPillEl.isConnected !== false),
         railMounted: Boolean(railEl && railEl.isConnected !== false),
         railYielded,
         currentTurnIndex,
@@ -1258,6 +1384,7 @@
       enabled = false;
       detachListeners();
       clearPulse();
+      removeOmniPill();
       restoreModifiedDetails();
       cleanupEnhancedCodeBlocks();
       cleanupMermaidButtons();
@@ -1290,12 +1417,14 @@
 
   return {
     RAIL_TESTID,
+    OMNI_PILL_TESTID,
     CODE_BAR_ATTR,
     CODE_FOLDED_ATTR,
     CODE_ENHANCED_ATTR,
     DEFAULT_COLLAPSE_LINES,
     clampCollapseLines,
     countCodeLines,
+    extractPlainLinksAndPaths,
     createReadingNavController,
   };
 });

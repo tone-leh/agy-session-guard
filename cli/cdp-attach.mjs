@@ -299,6 +299,24 @@ export function isAntigravityHostTarget(target, opts = null) {
   return false;
 }
 
+const SWARM_TARGET_URL_RE = /^plugin:\/\/swarm--swarm_board(?:[-/]|$)/i;
+
+export function isAntigravitySwarmTarget(target, opts = null) {
+  const expectedPort =
+    opts && typeof opts === 'object' && Number.isInteger(opts.expectedPort) && opts.expectedPort > 0
+      ? opts.expectedPort
+      : null;
+  if (!target || (target.type !== 'page' && target.type !== 'iframe')) return false;
+  if (!isLoopbackWsUrl(target.webSocketDebuggerUrl, expectedPort)) return false;
+  const url = String(target.url || '').trim();
+  return SWARM_TARGET_URL_RE.test(url);
+}
+
+export function selectSwarmTargets(targets, opts = null) {
+  if (!Array.isArray(targets)) return [];
+  return targets.filter((t) => isAntigravitySwarmTarget(t, opts));
+}
+
 function formatCdpExceptionDetails(exceptionDetails) {
   if (!exceptionDetails || typeof exceptionDetails !== 'object') {
     return 'Uncaught CDP evaluation exception';

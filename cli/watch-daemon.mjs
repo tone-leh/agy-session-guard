@@ -43,7 +43,7 @@ import {
   readNovOpsTemplates,
   readNovState,
 } from './nov-bridge.mjs';
-import { auditAntigravityStorage, searchSanitizedSessions } from './storage-doctor.mjs';
+import { auditAntigravityStorage, readLocalTelemetrySnapshot, searchSanitizedSessions } from './storage-doctor.mjs';
 import { TranslatorService } from './translator-service.mjs';
 
 export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
@@ -966,16 +966,51 @@ export class SagWatchDaemon {
             return { reqId, ok: false, error: 'Storage audit failed' };
           }
         }
+        if (parsed && typeof parsed === 'object' && parsed.type === 'sag:telemetry_snapshot') {
+          const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
+          try {
+            const cascadeId = typeof parsed.payload?.cascadeId === 'string' ? parsed.payload.cascadeId.slice(0, 128) : '';
+            const snap = readLocalTelemetrySnapshot({
+              ...(this.storageDataDir ? { dataDir: this.storageDataDir } : {}),
+              cascadeId,
+              ...(this.novBridgeOpts?.dataDir ? { novDataDir: this.novBridgeOpts.dataDir } : {}),
+            });
+            return { reqId, ok: true, data: snap };
+          } catch {
+            return { reqId, ok: false, error: 'Telemetry snapshot failed' };
+          }
+        }
         if (
           parsed &&
           typeof parsed === 'object' &&
           (parsed.type === 'sag:translate_status' ||
             parsed.type === 'sag:translate_save_provider' ||
+            parsed.type === 'sag:translate_save_config' ||
             parsed.type === 'sag:translate_text' ||
-            parsed.type === 'sag:translate_diagnose')
+            parsed.type === 'sag:translate_batch_titles' ||
+            parsed.type === 'sag:translate_diagnose' ||
+            parsed.type === 'sag:translate_cache_stats' ||
+            parsed.type === 'sag:translate_clear_cache' ||
+            parsed.type === 'sag:translate_profiles' ||
+            parsed.type === 'sag:translate_save_profile' ||
+            parsed.type === 'sag:translate_delete_profile' ||
+            parsed.type === 'sag:translate_set_active_profile')
         ) {
           const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
-          return Promise.resolve(this.translatorService.handleBridgeRequest(parsed.type, parsed.payload || {}))
+          const payload = parsed.payload || {};
+          const streamRequestId = typeof payload.requestId === 'string' ? payload.requestId.slice(0, 128) : '';
+          const session = meta?.targetId ? this.bridgeSessions.get(meta.targetId) : null;
+          const streamOpts =
+            parsed.type === 'sag:translate_text' && streamRequestId && session?.push
+              ? {
+                  onChunk: ({ partial }) => {
+                    try {
+                      session.push('translate:chunk', { requestId: streamRequestId, partial });
+                    } catch {}
+                  },
+                }
+              : undefined;
+          return Promise.resolve(this.translatorService.handleBridgeRequest(parsed.type, payload, streamOpts))
             .then((res) => ({ reqId, ...(res || { ok: false, error: 'Translator service error' }) }))
             .catch((err) => ({ reqId, ok: false, error: err?.message || 'Translator service error' }));
         }

@@ -827,6 +827,11 @@
           return true;
         }
       }
+      if (typeof options.onPushEvent === 'function') {
+        try {
+          if (options.onPushEvent(ev, msg)) return true;
+        } catch {}
+      }
       return false;
     }
 

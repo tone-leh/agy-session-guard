@@ -35,6 +35,14 @@ const MAX_SEARCH_LIMIT = 20;
 const MAX_SEARCH_MATCHES_PER_SESSION = 3;
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const BACKUP_PRIORITY_ROOTS = new Set(['conversations', 'annotations', 'brain']);
+const TELEMETRY_CACHE_TTL_MS = 10_000;
+const TELEMETRY_CACHE_MAX_ENTRIES = 64;
+const TELEMETRY_TRANSCRIPT_READ_CAP = 512 * 1024;
+const TELEMETRY_NOV_JSON_MAX_BYTES = 256 * 1024;
+const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_CONTEXT_MAX_TOKENS = 512_000;
+const telemetryCache = new Map(); // cacheKey -> { ts, value }
 let exportTmpCounter = 0;
 
 export function redactSecrets(text) {
@@ -1331,6 +1339,454 @@ export function formatStorageSearchHuman(report) {
     }
   }
   return lines.join('\n');
+}
+
+function readFilePrefixNoFollowSync(filePath, maxBytes) {
+  let fd = null;
+  try {
+    let flags = fs.constants.O_RDONLY;
+    if (process.platform !== 'win32' && typeof fs.constants?.O_NOFOLLOW === 'number') {
+      flags |= fs.constants.O_NOFOLLOW;
+    }
+    fd = fs.openSync(filePath, flags);
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) return null;
+    const toRead = Math.min(st.size, maxBytes);
+    if (toRead <= 0) return { size: st.size, mtimeMs: Math.round(st.mtimeMs || 0), buf: Buffer.alloc(0), truncated: false };
+    const buf = Buffer.allocUnsafe(toRead);
+    let offset = 0;
+    while (offset < toRead) {
+      const n = fs.readSync(fd, buf, offset, toRead - offset, offset);
+      if (n <= 0) break;
+      offset += n;
+    }
+    return {
+      size: st.size,
+      mtimeMs: Math.round(st.mtimeMs || 0),
+      buf: offset === toRead ? buf : buf.subarray(0, offset),
+      truncated: st.size > maxBytes,
+    };
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
+}
+
+function countNonEmptyLinesInBuf(buf) {
+  if (!buf || buf.length === 0) return 0;
+  let lines = 0;
+  let hasContentOnLine = false;
+  for (let i = 0; i < buf.length; i += 1) {
+    const b = buf[i];
+    if (b === 0x0a) {
+      if (hasContentOnLine) lines += 1;
+      hasContentOnLine = false;
+    } else if (b !== 0x0d && b !== 0x20 && b !== 0x09) {
+      hasContentOnLine = true;
+    }
+  }
+  if (hasContentOnLine) lines += 1;
+  return lines;
+}
+
+function readSafeNovXraySummary(novDataDir) {
+  if (!novDataDir || !String(novDataDir).trim()) return { data: null, skippedSymlinks: 0 };
+  const resolvedNov = path.resolve(expandTildePath(String(novDataDir)));
+  const rootSt = safeLstat(resolvedNov);
+  if (!rootSt || rootSt.isSymbolicLink() || !rootSt.isDirectory()) {
+    return { data: null, skippedSymlinks: rootSt?.isSymbolicLink?.() ? 1 : 0 };
+  }
+  let realNov;
+  try {
+    realNov = canonicalRealpathSync(resolvedNov);
+  } catch {
+    return { data: null, skippedSymlinks: 0 };
+  }
+
+  let skippedSymlinks = 0;
+  const candidates = [
+    { file: path.join(resolvedNov, 'xray', 'summary.json'), kind: 'xray-summary' },
+    { file: path.join(resolvedNov, 'feed-snapshot.json'), kind: 'feed-snapshot' },
+  ];
+
+  for (const cand of candidates) {
+    let cur = path.dirname(cand.file);
+    let symFound = false;
+    while (cur.startsWith(resolvedNov) && cur !== resolvedNov) {
+      const pst = safeLstat(cur);
+      if (pst && pst.isSymbolicLink()) {
+        symFound = true;
+        break;
+      }
+      cur = path.dirname(cur);
+    }
+    if (symFound) {
+      skippedSymlinks += 1;
+      continue;
+    }
+    const st = safeLstat(cand.file);
+    if (!st) continue;
+    if (st.isSymbolicLink()) {
+      skippedSymlinks += 1;
+      continue;
+    }
+    if (!st.isFile() || st.size <= 0 || st.size > TELEMETRY_NOV_JSON_MAX_BYTES) continue;
+
+    let realFile;
+    try {
+      realFile = canonicalRealpathSync(cand.file);
+    } catch {
+      continue;
+    }
+    if (!isPathWithinBase(realFile, realNov)) {
+      skippedSymlinks += 1;
+      continue;
+    }
+
+    const prefix = readFilePrefixNoFollowSync(realFile, TELEMETRY_NOV_JSON_MAX_BYTES);
+    if (!prefix || prefix.truncated) continue;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(prefix.buf.toString('utf8'));
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== 'object') continue;
+
+    // Extract strictly sanitized numeric & safe metadata fields only (zero secrets/prose leakage)
+    const src = parsed.xray && typeof parsed.xray === 'object' ? parsed.xray : parsed;
+    const toPosNum = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+    const usedTokens = toPosNum(src.usedTokens ?? src.contextTokens ?? src.totalTokens);
+    const maxTokens = toPosNum(src.maxTokens ?? src.contextWindow);
+    const usedFraction =
+      typeof src.usedFraction === 'number' && Number.isFinite(src.usedFraction) && src.usedFraction >= 0
+        ? src.usedFraction
+        : usedTokens !== null && maxTokens && maxTokens > 0
+          ? usedTokens / maxTokens
+          : null;
+    const rawCid = String(src.cascadeId || src.sessionId || '').trim();
+    const safeCid = rawCid && SESSION_ID_RE.test(rawCid) ? rawCid : null;
+    const sessionCount = toPosNum(src.sessionCount ?? src.sessionsCount);
+    const totalTokens = toPosNum(src.totalTokens ?? usedTokens);
+
+    if (usedTokens === null && usedFraction === null && totalTokens === null && sessionCount === null) {
+      continue;
+    }
+
+    return {
+      data: {
+        kind: cand.kind,
+        ...(safeCid ? { cascadeId: safeCid } : {}),
+        ...(usedTokens !== null ? { usedTokens: Math.round(usedTokens) } : {}),
+        ...(maxTokens !== null && maxTokens > 0 ? { maxTokens: Math.round(maxTokens) } : {}),
+        ...(usedFraction !== null ? { usedFraction } : {}),
+        ...(totalTokens !== null ? { totalTokens: Math.round(totalTokens) } : {}),
+        ...(sessionCount !== null ? { sessionCount: Math.round(sessionCount) } : {}),
+        mtimeMs: prefix.mtimeMs,
+      },
+      skippedSymlinks,
+    };
+  }
+
+  return { data: null, skippedSymlinks };
+}
+
+export function readLocalTelemetrySnapshot({
+  dataDir = DEFAULT_DATA_DIR,
+  cascadeId = null,
+  novDataDir = null,
+  nowMs = Date.now(),
+} = {}) {
+  const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  const resolvedDataDir = path.resolve(expandTildePath(dataDir || DEFAULT_DATA_DIR));
+  const resolvedNovDir = novDataDir && String(novDataDir).trim() ? path.resolve(expandTildePath(String(novDataDir))) : '';
+  const rawCid = cascadeId !== null && cascadeId !== undefined ? String(cascadeId).trim() : '';
+  const safeCid = rawCid && SESSION_ID_RE.test(rawCid) ? rawCid : null;
+  const cacheKey = `${resolvedDataDir}\0${safeCid || ''}\0${resolvedNovDir}`;
+
+  const hit = telemetryCache.get(cacheKey);
+  if (hit && now - hit.ts >= 0 && now - hit.ts < TELEMETRY_CACHE_TTL_MS) {
+    return { ...hit.value, cached: true };
+  }
+
+  let skippedSymlinks = 0;
+  let session = null;
+  let hasDiskData = false;
+  const sessionActivity = new Map(); // sessionId -> { mtimeMs, estSteps }
+
+  const rootStat = safeLstat(resolvedDataDir);
+  let realDataDir = null;
+  if (rootStat && !rootStat.isSymbolicLink() && rootStat.isDirectory()) {
+    try {
+      realDataDir = canonicalRealpathSync(resolvedDataDir);
+    } catch {
+      realDataDir = null;
+    }
+  } else if (rootStat?.isSymbolicLink?.()) {
+    skippedSymlinks += 1;
+  }
+
+  const readSessionTranscriptMetrics = (brainDir, realBrainDir, sid) => {
+    const sessDir = path.resolve(brainDir, sid);
+    if (!isPathWithinBase(sessDir, brainDir)) return null;
+    const sst = safeLstat(sessDir);
+    if (!sst) return null;
+    if (sst.isSymbolicLink()) {
+      skippedSymlinks += 1;
+      return null;
+    }
+    if (!sst.isDirectory()) return null;
+
+    const candidates = [
+      path.join(sessDir, '.system_generated', 'logs', 'transcript.jsonl'),
+      path.join(sessDir, 'transcript.jsonl'),
+    ];
+    for (const tp of candidates) {
+      let cur = path.dirname(tp);
+      let symFound = false;
+      while (cur.startsWith(sessDir) && cur !== sessDir) {
+        const pst = safeLstat(cur);
+        if (pst && pst.isSymbolicLink()) {
+          symFound = true;
+          break;
+        }
+        cur = path.dirname(cur);
+      }
+      if (symFound) {
+        skippedSymlinks += 1;
+        continue;
+      }
+      const tst = safeLstat(tp);
+      if (!tst) continue;
+      if (tst.isSymbolicLink()) {
+        skippedSymlinks += 1;
+        continue;
+      }
+      if (!tst.isFile()) continue;
+
+      let realTp;
+      try {
+        realTp = canonicalRealpathSync(tp);
+      } catch {
+        continue;
+      }
+      if (!isPathWithinBase(realTp, realBrainDir) || !isPathWithinBase(realTp, realDataDir)) {
+        skippedSymlinks += 1;
+        continue;
+      }
+
+      const prefix = readFilePrefixNoFollowSync(realTp, TELEMETRY_TRANSCRIPT_READ_CAP);
+      if (!prefix) continue;
+      const sampleLines = countNonEmptyLinesInBuf(prefix.buf);
+      const stepCount =
+        prefix.truncated && prefix.buf.length > 0 && sampleLines > 0
+          ? Math.max(sampleLines, Math.round((sampleLines * prefix.size) / prefix.buf.length))
+          : sampleLines;
+      const usedTokens =
+        prefix.size > 0 || stepCount > 0
+          ? Math.max(2000, Math.round(prefix.size / 3.6) + stepCount * 420 + 4000)
+          : 0;
+      return {
+        cascadeId: sid,
+        exists: true,
+        transcriptPath: toPosixRel(resolvedDataDir, tp),
+        bytes: prefix.size,
+        stepCount,
+        estimated: prefix.truncated,
+        usedTokens,
+        maxTokens: DEFAULT_CONTEXT_MAX_TOKENS,
+        mtimeMs: prefix.mtimeMs,
+      };
+    }
+    return null;
+  };
+
+  if (realDataDir) {
+    // 1) Scan brain/ top-level entries & optionally inspect target cascadeId
+    const brainDir = path.join(resolvedDataDir, 'brain');
+    const brainSt = safeLstat(brainDir);
+    if (brainSt && brainSt.isSymbolicLink()) {
+      skippedSymlinks += 1;
+    } else if (brainSt && brainSt.isDirectory()) {
+      let realBrainDir = null;
+      try {
+        realBrainDir = canonicalRealpathSync(brainDir);
+      } catch {
+        realBrainDir = null;
+      }
+      if (realBrainDir && isPathWithinBase(realBrainDir, realDataDir)) {
+        hasDiskData = true;
+        if (safeCid) {
+          session = readSessionTranscriptMetrics(brainDir, realBrainDir, safeCid);
+        }
+        let entries = [];
+        try {
+          entries = fs.readdirSync(brainDir, { withFileTypes: true });
+        } catch {
+          entries = [];
+        }
+        let brainScanned = 0;
+        for (const ent of entries) {
+          if (brainScanned >= 1000) break;
+          if (!SESSION_ID_RE.test(ent.name)) continue;
+          const full = path.join(brainDir, ent.name);
+          const st = safeLstat(full);
+          if (!st) continue;
+          if (st.isSymbolicLink()) {
+            skippedSymlinks += 1;
+            continue;
+          }
+          if (!st.isDirectory()) continue;
+          brainScanned += 1;
+          let mtimeMs = Math.round(st.mtimeMs || 0);
+          let estSteps = 1;
+          if (session && session.cascadeId === ent.name) {
+            mtimeMs = Math.max(mtimeMs, session.mtimeMs || 0);
+            estSteps = Math.max(1, session.stepCount || 1);
+          } else {
+            let nestedSt = null;
+            const sgDir = path.join(full, '.system_generated');
+            const sgSt = safeLstat(sgDir);
+            if (sgSt && sgSt.isSymbolicLink()) {
+              skippedSymlinks += 1;
+            } else if (sgSt && sgSt.isDirectory()) {
+              const logsDir = path.join(sgDir, 'logs');
+              const logsSt = safeLstat(logsDir);
+              if (logsSt && logsSt.isSymbolicLink()) {
+                skippedSymlinks += 1;
+              } else if (logsSt && logsSt.isDirectory()) {
+                nestedSt = safeLstat(path.join(logsDir, 'transcript.jsonl'));
+                if (nestedSt && nestedSt.isSymbolicLink()) {
+                  skippedSymlinks += 1;
+                  nestedSt = null;
+                }
+              }
+            }
+            const rootTpSt = !nestedSt ? safeLstat(path.join(full, 'transcript.jsonl')) : null;
+            if (rootTpSt && rootTpSt.isSymbolicLink()) skippedSymlinks += 1;
+            const tpSt = nestedSt && !nestedSt.isSymbolicLink() && nestedSt.isFile()
+              ? nestedSt
+              : rootTpSt && !rootTpSt.isSymbolicLink() && rootTpSt.isFile()
+                ? rootTpSt
+                : null;
+            if (tpSt) {
+              mtimeMs = Math.max(mtimeMs, Math.round(tpSt.mtimeMs || 0));
+              estSteps = Math.max(1, Math.round(tpSt.size / 1024));
+            }
+          }
+          const prev = sessionActivity.get(ent.name);
+          if (!prev || mtimeMs > prev.mtimeMs) {
+            sessionActivity.set(ent.name, { mtimeMs, estSteps: Math.max(estSteps, prev?.estSteps || 0) });
+          }
+        }
+      }
+    }
+
+    // 2) Scan conversations/ top-level entries (mtimeMs & size-based step fallback)
+    const convDir = path.join(resolvedDataDir, 'conversations');
+    const convSt = safeLstat(convDir);
+    if (convSt && convSt.isSymbolicLink()) {
+      skippedSymlinks += 1;
+    } else if (convSt && convSt.isDirectory()) {
+      let realConvDir = null;
+      try {
+        realConvDir = canonicalRealpathSync(convDir);
+      } catch {
+        realConvDir = null;
+      }
+      if (realConvDir && isPathWithinBase(realConvDir, realDataDir)) {
+        hasDiskData = true;
+        let entries = [];
+        try {
+          entries = fs.readdirSync(convDir, { withFileTypes: true });
+        } catch {
+          entries = [];
+        }
+        let convScanned = 0;
+        const MAX_CONV_TELEMETRY_ENTRIES = 2000;
+        for (const ent of entries) {
+          if (convScanned >= MAX_CONV_TELEMETRY_ENTRIES) break;
+          convScanned += 1;
+          const full = path.join(convDir, ent.name);
+          const st = safeLstat(full);
+          if (!st) continue;
+          if (st.isSymbolicLink()) {
+            skippedSymlinks += 1;
+            continue;
+          }
+          if (!st.isFile()) continue;
+          const sid = ent.name.replace(/\.[^.]+$/, '') || ent.name;
+          const mtimeMs = Math.round(st.mtimeMs || 0);
+          const estSteps = Math.max(1, Math.round(st.size / 2048));
+          const prev = sessionActivity.get(sid);
+          if (!prev) {
+            sessionActivity.set(sid, { mtimeMs, estSteps });
+          } else {
+            sessionActivity.set(sid, {
+              mtimeMs: Math.max(prev.mtimeMs, mtimeMs),
+              estSteps: Math.max(prev.estSteps, estSteps),
+            });
+          }
+        }
+      }
+    }
+  }
+
+  let active5hSessions = 0;
+  let active5hSteps = 0;
+  let active7dSessions = 0;
+  let active7dSteps = 0;
+  for (const item of sessionActivity.values()) {
+    const age = now - item.mtimeMs;
+    if (age >= -60_000 && age <= SEVEN_DAYS_MS) {
+      active7dSessions += 1;
+      active7dSteps += item.estSteps;
+      if (age <= FIVE_HOURS_MS) {
+        active5hSessions += 1;
+        active5hSteps += item.estSteps;
+      }
+    }
+  }
+
+  // 3) Optional read-only agy-NOV X-Ray summary merge (<= 256 KB, no symlinks)
+  const novRes = readSafeNovXraySummary(resolvedNovDir);
+  skippedSymlinks += novRes.skippedSymlinks;
+  const novXray = novRes.data;
+
+  const dataSource = novXray ? 'nov-xray' : hasDiskData || session ? 'local-disk' : 'none';
+  const snapshot = {
+    ok: true,
+    readOnly: true,
+    cached: false,
+    timestamp: now,
+    dataDir: resolvedDataDir,
+    dataSource,
+    cascadeId: safeCid,
+    session,
+    activity: {
+      active5hSessions,
+      active5hSteps,
+      active7dSessions,
+      active7dSteps,
+    },
+    active5hSessions,
+    active5hSteps,
+    active7dSessions,
+    active7dSteps,
+    novXray,
+    skippedSymlinks,
+  };
+
+  if (telemetryCache.size >= TELEMETRY_CACHE_MAX_ENTRIES) {
+    const oldestKey = telemetryCache.keys().next().value;
+    if (oldestKey !== undefined) telemetryCache.delete(oldestKey);
+  }
+  telemetryCache.set(cacheKey, { ts: now, value: snapshot });
+  return snapshot;
 }
 
 export function createStorageBackup({

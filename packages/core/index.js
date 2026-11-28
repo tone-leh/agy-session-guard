@@ -9,7 +9,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const VERSION = '1.4.1';
+  const VERSION = '1.5.0';
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -211,6 +211,7 @@
             corners: nextCfg.themeCorners || 'balanced',
             surface: nextCfg.themeSurface || 'smoked',
             codeFont: nextCfg.themeCodeFont || 'default',
+            chatFont: nextCfg.themeChatFont || 'default',
             codeLigatures: Boolean(nextCfg.themeCodeLigatures),
             ambientGlow: nextCfg.themeAmbientGlow || 'subtle',
             streamFade: nextCfg.themeStreamFade !== false,
@@ -244,6 +245,7 @@
           targetLang: nextCfg.thoughtTargetLang || 'auto',
           triggerMode: nextCfg.thoughtTrigger || 'auto',
           viewMode: nextCfg.thoughtViewMode || 'bilingual',
+          stylePreset: nextCfg.thoughtStylePreset || 'technical',
           translateTitles: Boolean(nextCfg.thoughtTranslateTitles),
           conflictPolicy: nextCfg.hostI18nConflictPolicy || 'yield',
         });
@@ -252,6 +254,9 @@
       prismBridge?.sync?.();
       syncStatusPill();
     };
+
+    let lastStreamStartedAtMs = 0;
+    let lastCompletedAtMs = 0;
 
     const compactGuard = compactMod.createCompactGuardController({
       ...options,
@@ -291,7 +296,8 @@
           promptQueue.sync?.();
         }
         if (themeStudio && compactGuard.getConfig().modules?.themeStudio) {
-          const convState = themeStudioMod?.detectConvStateFromDom
+          const nowTs = Date.now();
+          let convState = themeStudioMod?.detectConvStateFromDom
             ? themeStudioMod.detectConvStateFromDom(doc, { streaming: Boolean(snap?.streaming) })
             : Boolean(
                   doc?.querySelector?.(
@@ -304,6 +310,17 @@
                 : snap?.streaming
                   ? 'running'
                   : 'idle';
+          if (convState === 'running') {
+            if (!lastStreamStartedAtMs) lastStreamStartedAtMs = nowTs;
+          } else {
+            if (convState === 'idle' && lastStreamStartedAtMs > 0 && nowTs - lastStreamStartedAtMs >= 20000) {
+              lastCompletedAtMs = nowTs;
+            }
+            lastStreamStartedAtMs = 0;
+            if (convState === 'idle' && lastCompletedAtMs > 0 && nowTs - lastCompletedAtMs < 15000) {
+              convState = 'completed';
+            }
+          }
           themeStudio.setConvState?.(convState);
         }
         syncStatusPill();
@@ -599,6 +616,7 @@
           corners: cfg.themeCorners || 'balanced',
           surface: cfg.themeSurface || 'smoked',
           codeFont: cfg.themeCodeFont || 'default',
+          chatFont: cfg.themeChatFont || 'default',
           codeLigatures: Boolean(cfg.themeCodeLigatures),
           ambientGlow: cfg.themeAmbientGlow || 'subtle',
           streamFade: cfg.themeStreamFade !== false,
@@ -626,6 +644,8 @@
 
     let novFeedFetched = false;
     let novFeedInFlight = false;
+    let localTelemetryFetched = false;
+    const ctxSourceMod = options.contextSource || resolveDep('__agSgContextSource', './context-source.js');
     novSynergy = novSynergyMod?.createNovSynergyController
       ? novSynergyMod.createNovSynergyController({
           win,
@@ -637,7 +657,43 @@
           autoRefresh: options.novAutoRefresh,
           now: options.now,
           getSagConfig: () => compactGuard.getConfig(),
+          onPushEvent: (ev, msg) => {
+            if (ev === 'translate:chunk') {
+              const reqId = msg?.requestId || msg?.data?.requestId || '';
+              const partial = msg?.partial ?? msg?.data?.partial ?? '';
+              if (reqId && thoughtTranslator?.applyStreamChunk) {
+                thoughtTranslator.applyStreamChunk(reqId, partial);
+                return true;
+              }
+            }
+            if (ev === 'telemetry:snapshot') {
+              const snap = msg?.snapshot || msg?.data || null;
+              if (snap && ctxSourceMod?.setLocalTelemetrySnapshot) {
+                ctxSourceMod.setLocalTelemetrySnapshot(snap);
+                syncStatusPill();
+                return true;
+              }
+            }
+            return false;
+          },
           onStateChange: (novState) => {
+            if (novState?.bridgeConnected && !localTelemetryFetched && ctxSourceMod?.setLocalTelemetrySnapshot && !options.novTransport) {
+              localTelemetryFetched = true;
+              const t = setTimeout(() => {
+                if (destroyed || !novSynergy?.isBridgeAvailable?.()) return;
+                const cid = ctxSourceMod?.detectCascadeId?.(doc, win) || '';
+                Promise.resolve(novSynergy.requestRaw?.('sag:telemetry_snapshot', { cascadeId: cid }))
+                  .then((res) => {
+                    const snap = res?.raw?.data ?? res?.data ?? null;
+                    if (!destroyed && res?.ok && snap) {
+                      ctxSourceMod.setLocalTelemetrySnapshot(snap);
+                      syncStatusPill();
+                    }
+                  })
+                  .catch(() => {});
+              }, 0);
+              t?.unref?.();
+            }
             if (novState?.bridgeConnected && hostI18n) {
               const dbg = hostI18n.getDebugState?.();
               if (dbg?.enabled && !dbg.destroyed && dbg.locale && dbg.locale !== 'en' && !dbg.extendedPackLoaded) {
@@ -802,11 +858,13 @@
           targetLang: cfg.thoughtTargetLang || 'auto',
           triggerMode: cfg.thoughtTrigger || 'auto',
           viewMode: cfg.thoughtViewMode || 'bilingual',
+          stylePreset: cfg.thoughtStylePreset || 'technical',
           translateTitles: Boolean(cfg.thoughtTranslateTitles),
           conflictPolicy: cfg.hostI18nConflictPolicy || 'yield',
           autoObserve: options.autoObserve,
           getEffectiveLang: () => compactGuard.getConfig()?.hostI18nLocale || 'zh-CN',
           onRequestTranslate: (req) => callTranslatorBridge('sag:translate_text', req),
+          onRequestBatchTitles: (req) => callTranslatorBridge('sag:translate_batch_titles', req),
         })
       : null;
 
@@ -852,6 +910,8 @@
           onTranslatorStatus: () => callTranslatorBridge('sag:translate_status', {}),
           onTranslatorSaveProvider: (req) => callTranslatorBridge('sag:translate_save_provider', req),
           onTranslatorDiagnose: (req) => callTranslatorBridge('sag:translate_diagnose', req),
+          onTranslatorClearCache: () => callTranslatorBridge('sag:translate_clear_cache', {}),
+          onTranslatorSaveConfig: (req) => callTranslatorBridge('sag:translate_save_config', req),
           onTestRadarAudio: () => sessionRadar?.testAudioAlert?.(),
           onExportPromptSnippets: () => promptLibrary?.exportSnippetsJson?.() || '{"version":1,"snippets":[]}',
           onImportPromptSnippets: (raw) => promptLibrary?.importSnippetsJson?.(raw) || { ok: false, errors: ['Prompt Library unavailable'] },

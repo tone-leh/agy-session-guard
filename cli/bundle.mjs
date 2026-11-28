@@ -124,6 +124,7 @@ export const REMOVE_EXPRESSION = `(() => {
         'data-ag-sag-theme-corners',
         'data-ag-sag-theme-surface',
         'data-ag-sag-theme-code-font',
+        'data-ag-sag-theme-chat-font',
         'data-ag-sag-theme-ligatures',
         'data-ag-sag-theme-glow',
         'data-ag-sag-theme-policy',
@@ -132,6 +133,7 @@ export const REMOVE_EXPRESSION = `(() => {
         'data-ag-sag-theme-sidebar',
         'data-ag-sag-theme-wide',
         'data-ag-sag-conv-state',
+        'data-ag-sag-hibernated',
       ]) {
         if (!toRemove.includes(fallbackAttr)) toRemove.push(fallbackAttr);
       }
@@ -601,31 +603,76 @@ function createFreeSymbolGenerator(text) {
   };
 }
 
-function compressWithFreeSymbols(rawText, candidates, { minOccurrences = 3, entryOverhead = 8 } = {}) {
+function encodeDictLiteral(dict) {
+  const joined = dict.join('');
+  const sepCandidates = ['~', '^', '`', '|', '¦', '§', '¤', '¬', '¶', '¿', '\u00a6', '\u00a7'];
+  const sep = sepCandidates.find((ch) => !joined.includes(ch));
+  const arrSrc = `[${dict.map(sqEsc).join(',')}]`;
+  if (!sep) return arrSrc;
+  const splitSrc = `${sqEsc(dict.join(sep))}.split(${sqEsc(sep)})`;
+  return Buffer.byteLength(splitSrc, 'utf8') < Buffer.byteLength(arrSrc, 'utf8') ? splitSrc : arrSrc;
+}
+
+function collectBpeNgramCandidates(text, { minOccurrences = 3, maxCount = 320, symBytes = 2, skipToken = null } = {}) {
+  const freq = new Map();
+  const len = text.length;
+  for (let n = 4; n >= 2; n -= 1) {
+    const step = len > 120000 ? 2 : 1;
+    for (let i = 0; i <= len - n; i += step) {
+      const tok = text.slice(i, i + n);
+      if (skipToken && skipToken(tok)) continue;
+      freq.set(tok, (freq.get(tok) || 0) + 1);
+    }
+  }
+  const out = [];
+  for (const [tok, cnt] of freq.entries()) {
+    if (cnt < minOccurrences) continue;
+    const tb = Buffer.byteLength(tok, 'utf8');
+    if (tb <= symBytes) continue;
+    const gain = (cnt - 1) * (tb - symBytes) - 4;
+    if (gain > 4) out.push({ tok, cnt, gain });
+  }
+  return out.sort((a, b) => b.gain - a.gain || b.tok.length - a.tok.length).slice(0, maxCount);
+}
+
+function compressWithFreeSymbols(rawText, candidates, { minOccurrences = 2, entryOverhead = 3, bpePasses = 1, skipBpeToken = null } = {}) {
   const nextSym = createFreeSymbolGenerator(rawText);
   let packed = rawText;
   const dict = [];
   const syms = [];
   let pendingSym = null;
 
-  for (const { tok } of candidates) {
-    const sym = pendingSym || nextSym();
-    if (!sym) break;
-    pendingSym = sym;
-    const symBytes = Buffer.byteLength(sym, 'utf8');
-    const tokBytes = Buffer.byteLength(tok, 'utf8');
-    if (tokBytes <= symBytes) continue;
-    const parts = packed.split(tok);
-    const occurrences = parts.length - 1;
-    if (
-      occurrences >= minOccurrences &&
-      occurrences * (tokBytes - symBytes) > tokBytes + symBytes + entryOverhead
-    ) {
-      packed = parts.join(sym);
-      dict.push(tok);
-      syms.push(sym);
-      pendingSym = null;
+  const applyList = (list, minOcc) => {
+    for (const { tok } of list) {
+      const sym = pendingSym || nextSym();
+      if (!sym) break;
+      pendingSym = sym;
+      const symBytes = Buffer.byteLength(sym, 'utf8');
+      const tokBytes = Buffer.byteLength(tok, 'utf8');
+      if (tokBytes <= symBytes) continue;
+      const parts = packed.split(tok);
+      const occurrences = parts.length - 1;
+      if (
+        occurrences >= minOcc &&
+        occurrences * (tokBytes - symBytes) > tokBytes + symBytes + entryOverhead
+      ) {
+        packed = parts.join(sym);
+        dict.push(tok);
+        syms.push(sym);
+        pendingSym = null;
+      }
     }
+  };
+
+  applyList(candidates, minOccurrences);
+
+  // Optional BPE-style second pass over already-compressed text (zero extra decoder overhead)
+  for (let pass = 0; pass < bpePasses; pass += 1) {
+    const extra = collectBpeNgramCandidates(packed, { minOccurrences: 3, maxCount: 280, skipToken: skipBpeToken });
+    if (!extra.length) break;
+    const prevLen = dict.length;
+    applyList(extra, 3);
+    if (dict.length === prevLen) break;
   }
 
   if (!dict.length) return null;
@@ -832,10 +879,10 @@ function packStringArrayConst(code, constName, { allow2D = true } = {}) {
     { minGain: 8, maxCount: 600 }
   );
 
-  const compressed = compressWithFreeSymbols(flat, candidates, { minOccurrences: 3, entryOverhead: 6 });
+  const compressed = compressWithFreeSymbols(flat, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 3 });
   let replacement;
   if (compressed) {
-    const dictSrc = `[${compressed.d.map(sqEsc).join(',')}]`;
+    const dictSrc = encodeDictLiteral(compressed.d);
     replacement = `(()=>{const _k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return _s.split(${sqEsc(rowSep)}).map(r=>r.split(${sqEsc(colSep)}));})()`;
   } else {
     replacement = `${sqEsc(flat)}.split(${sqEsc(rowSep)}).map(r=>r.split(${sqEsc(colSep)}))`;
@@ -899,10 +946,10 @@ function packStaticJsonConst(code, constName, obj) {
     { minGain: 6, maxCount: 640 }
   );
 
-  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 3, entryOverhead: 6 });
+  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 3 });
   if (!compressed) return code;
 
-  const dictSrc = `[${compressed.d.map(sqEsc).join(',')}]`;
+  const dictSrc = encodeDictLiteral(compressed.d);
   const replacement = `(()=>{const _k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return JSON.parse(_s);})()`;
 
   try {
@@ -947,9 +994,14 @@ function packStaticCssConstInCode(code, constName, { useDict = false, runtimeCss
       { minGain: 6, maxCount: 512 }
     );
 
-    const compressed = compressWithFreeSymbols(min, candidates, { minOccurrences: 3, entryOverhead: 6 });
+    const compressed = compressWithFreeSymbols(min, candidates, {
+      minOccurrences: 2,
+      entryOverhead: 3,
+      bpePasses: 1,
+      skipBpeToken: (tok) => /[+()%01]/.test(tok) || /calc/i.test(tok),
+    });
     if (compressed) {
-      const dictSrc = `[${compressed.d.map(sqEsc).join(',')}]`;
+      const dictSrc = encodeDictLiteral(compressed.d);
       const dictExpr = `(()=>{const _k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return _s;})()`;
       if (Buffer.byteLength(dictExpr, 'utf8') < Buffer.byteLength(replacement, 'utf8')) {
         replacement = dictExpr;
@@ -1020,15 +1072,87 @@ function packFrozenArrayConst(code, constName) {
     ],
     { minGain: 6, maxCount: 384 }
   );
-  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 3, entryOverhead: 6 });
+  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 1 });
   if (!compressed) return code;
 
-  const dictSrc = `[${compressed.d.map(sqEsc).join(',')}]`;
+  const dictSrc = encodeDictLiteral(compressed.d);
   const replacement = `Object.freeze((()=>{const _k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return JSON.parse(_s).map(Object.freeze);})())`;
 
   try {
     const restored = evalJsExprInSandbox(replacement);
     if (!deepEqualAcrossRealms(restored, origArr)) return code;
+  } catch {
+    return code;
+  }
+
+  if (Buffer.byteLength(replacement, 'utf8') >= Buffer.byteLength(code.slice(exprStart, exprEnd), 'utf8')) return code;
+  return code.slice(0, exprStart) + replacement + code.slice(exprEnd);
+}
+
+function packFrozenObjectConst(code, constName, runtimeObj = null) {
+  const marker = `const ${constName}=Object.freeze(`;
+  const start = code.indexOf(marker);
+  if (start < 0) return code;
+  const exprStart = start + `const ${constName}=`.length;
+  const callOpen = exprStart + 'Object.freeze'.length;
+  let depth = 0;
+  let quote = '';
+  let exprEnd = -1;
+  for (let i = callOpen; i < code.length; i += 1) {
+    const c = code[i];
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = '';
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; continue; }
+    if (c === '(') depth += 1;
+    else if (c === ')') {
+      depth -= 1;
+      if (depth === 0) { exprEnd = i + 1; break; }
+    }
+  }
+  if (exprEnd < 0) return code;
+
+  let origObj = runtimeObj;
+  if (!origObj || typeof origObj !== 'object' || Array.isArray(origObj)) {
+    try {
+      origObj = evalJsExprInSandbox(code.slice(exprStart, exprEnd));
+    } catch {
+      return code;
+    }
+  }
+  if (!origObj || typeof origObj !== 'object' || Array.isArray(origObj)) return code;
+  const rawJson = JSON.stringify(origObj);
+  try {
+    if (!deepEqualAcrossRealms(JSON.parse(rawJson), origObj)) return code;
+  } catch {
+    return code;
+  }
+
+  const candidates = collectPatternCandidates(
+    rawJson,
+    [
+      /","[A-Za-z0-9_-]{3,28}":"/g,
+      /"[A-Za-z0-9_-]{3,28}":/g,
+      /#[0-9a-fA-F]{6}/g,
+      /rgba\([^)]{4,28}\)/g,
+      /[A-Za-z0-9_-]{4,28}/g,
+    ],
+    { minGain: 4, maxCount: 384 }
+  );
+  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 1 });
+  let replacement;
+  if (compressed) {
+    const dictSrc = encodeDictLiteral(compressed.d);
+    replacement = `(()=>{const _f=v=>{if(v&&typeof v==='object'&&!Object.isFrozen(v)){Object.freeze(v);for(const k in v)_f(v[k]);}return v;},_k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return _f(JSON.parse(_s));})()`;
+  } else {
+    replacement = `(()=>{const _f=v=>{if(v&&typeof v==='object'&&!Object.isFrozen(v)){Object.freeze(v);for(const k in v)_f(v[k]);}return v;};return _f(JSON.parse(${sqEsc(rawJson)}));})()`;
+  }
+
+  try {
+    const restored = evalJsExprInSandbox(replacement);
+    if (!deepEqualAcrossRealms(restored, origObj)) return code;
   } catch {
     return code;
   }
@@ -1054,6 +1178,26 @@ function compactCorePart(part) {
     code = packFrozenArrayConst(code, 'BUILTIN_SLASH_ITEMS');
     code = packFrozenArrayConst(code, 'NOV_PLAYBOOK_ITEMS');
     code = packFrozenArrayConst(code, 'BUILTIN_TEMPLATES');
+  } else if (part.file === 'nov-synergy.js') {
+    code = packFrozenArrayConst(code, 'NOV_MODULES_META');
+    code = packFrozenArrayConst(code, 'NOV_PRESETS_META');
+    code = packFrozenObjectConst(code, 'NOV_MODULE_CATEGORIES');
+  } else if (part.file === 'coexist.js') {
+    code = packFrozenObjectConst(code, 'MODULE_META');
+    code = packFrozenObjectConst(code, 'DEFAULT_CONFIG');
+    code = packFrozenObjectConst(code, 'PRESETS');
+  } else if (part.file === 'theme-studio.js') {
+    let tsMod = null;
+    try { tsMod = evalUmdModuleInSandbox(part.code); } catch {}
+    code = packFrozenObjectConst(code, 'THEME_PRESETS', tsMod?.THEME_PRESETS);
+    code = packFrozenObjectConst(code, 'LOOK_PRESETS', tsMod?.LOOK_PRESETS);
+    code = packFrozenObjectConst(code, 'ACCENT_PRESETS', tsMod?.ACCENT_PRESETS);
+    code = packFrozenObjectConst(code, 'SURFACE_PRESETS', tsMod?.SURFACE_PRESETS);
+    code = packFrozenObjectConst(code, 'CORNER_PRESETS', tsMod?.CORNER_PRESETS);
+    code = packFrozenObjectConst(code, 'CODE_FONT_PRESETS', tsMod?.CODE_FONT_PRESETS);
+    code = packFrozenObjectConst(code, 'CHAT_FONT_PRESETS', tsMod?.CHAT_FONT_PRESETS);
+    code = packFrozenObjectConst(code, 'DENSITY_PRESETS', tsMod?.DENSITY_PRESETS);
+    code = packFrozenObjectConst(code, 'DEFAULT_SETTINGS', tsMod?.DEFAULT_SETTINGS);
   } else if (part.file === 'host-i18n-packs.js') {
     code = packHostI18nExactRows(code);
   } else if (part.file === 'i18n.js') {
@@ -1103,7 +1247,7 @@ export function buildInjectExpression(config = null, opts = {}) {
     let packedPrelude = '';
     if (packedExact) {
       const metaJson = JSON.stringify({ locale: extPack.meta?.locale || resolvedExtLoc });
-      const dictSrc = `[${packedExact.d.map(sqEsc).join(',')}]`;
+      const dictSrc = encodeDictLiteral(packedExact.d);
       const patSrc = JSON.stringify(compactPatterns);
       const candidatePrelude = `(()=>{const _k=${sqEsc(packedExact.k)},_d=${dictSrc},_p=${patSrc};let _s=${sqEsc(packedExact.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);window.__agSagExtPacks=window.__agSagExtPacks||{};window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}]={meta:${metaJson},exact:JSON.parse(_s),patterns:_p.map(x=>({source:x[0],flags:x[2]||'i',replace:x[1]}))};})();`;
       try {
@@ -1165,6 +1309,6 @@ export function buildInjectExpression(config = null, opts = {}) {
     ...(bootCfg ? { config: bootCfg } : {}),
   });
   if (api) api.__agSgHash = targetHash;
-  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.4.1' };
+  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.5.0' };
 })()`;
 }

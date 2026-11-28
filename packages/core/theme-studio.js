@@ -25,6 +25,7 @@
     'data-ag-sag-theme-corners',
     'data-ag-sag-theme-surface',
     'data-ag-sag-theme-code-font',
+    'data-ag-sag-theme-chat-font',
     'data-ag-sag-theme-ligatures',
     'data-ag-sag-theme-glow',
     'data-ag-sag-theme-policy',
@@ -33,6 +34,7 @@
     'data-ag-sag-theme-sidebar',
     'data-ag-sag-theme-wide',
     'data-ag-sag-conv-state',
+    'data-ag-sag-hibernated',
   ];
 
   const CJK_SANS_STACK =
@@ -40,88 +42,47 @@
   const CJK_MONO_STACK =
     '"JetBrains Mono", "SF Mono", "Cascadia Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", "PingFang SC", "Noto Sans Mono CJK SC", "Microsoft YaHei UI", monospace';
 
-  const CODE_FONT_PRESETS = Object.freeze({
-    default: Object.freeze({
-      id: 'default',
-      stack: null,
-    }),
-    jetbrains: Object.freeze({
-      id: 'jetbrains',
-      stack: '"JetBrains Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, ui-monospace, monospace',
-    }),
-    cascadia: Object.freeze({
-      id: 'cascadia',
-      stack: '"Cascadia Code", "Cascadia Mono", "Fira Code", Consolas, ui-monospace, monospace',
-    }),
-    fira: Object.freeze({
-      id: 'fira',
-      stack: '"Fira Code", "JetBrains Mono", Menlo, Consolas, ui-monospace, monospace',
-    }),
-    sfmono: Object.freeze({
-      id: 'sfmono',
-      stack: '"SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, ui-monospace, monospace',
-    }),
-    sarasa: Object.freeze({
-      id: 'sarasa',
-      stack: '"Sarasa Mono SC", "Sarasa Term SC", "JetBrains Mono", "PingFang SC", "Microsoft YaHei UI", ui-monospace, monospace',
-    }),
-  });
+  const mkMap = (rows, fn) => Object.freeze(rows.reduce((a, r) => ((a[r[0]] = Object.freeze(fn(r))), a), {}));
+  const CODE_FONT_PRESETS = mkMap([
+    ['default', null],
+    ['jetbrains', '"JetBrains Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, ui-monospace, monospace'],
+    ['cascadia', '"Cascadia Code", "Cascadia Mono", "Fira Code", Consolas, ui-monospace, monospace'],
+    ['fira', '"Fira Code", "JetBrains Mono", Menlo, Consolas, ui-monospace, monospace'],
+    ['sfmono', '"SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, ui-monospace, monospace'],
+    ['sarasa', '"Sarasa Mono SC", "Sarasa Term SC", "JetBrains Mono", "PingFang SC", "Microsoft YaHei UI", ui-monospace, monospace'],
+  ], ([id, stack]) => ({ id, stack }));
 
-  const CORNER_PRESETS = Object.freeze({
-    sharp: Object.freeze({ id: 'sharp', sm: '3px', md: '5px', lg: '8px', bubble: '8px', input: '10px' }),
-    balanced: Object.freeze({ id: 'balanced', sm: '6px', md: '9px', lg: '12px', bubble: '14px', input: '14px' }),
-    soft: Object.freeze({ id: 'soft', sm: '8px', md: '12px', lg: '16px', bubble: '18px', input: '18px' }),
-    pill: Object.freeze({ id: 'pill', sm: '10px', md: '15px', lg: '20px', bubble: '22px', input: '22px' }),
-  });
+  const CHAT_FONT_PRESETS = mkMap([
+    ['default', null],
+    ['system', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'],
+    ['pingfang', '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", -apple-system, BlinkMacSystemFont, sans-serif'],
+    ['noto', '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", sans-serif'],
+    ['serif', '"Noto Serif SC", "Source Han Serif SC", "Songti SC", Georgia, "Times New Roman", serif'],
+  ], ([id, stack]) => ({ id, stack }));
 
-  const SURFACE_PRESETS = Object.freeze({
-    clean: Object.freeze({ id: 'clean' }),
-    smoked: Object.freeze({ id: 'smoked' }),
-    paper: Object.freeze({ id: 'paper' }),
-    glass: Object.freeze({ id: 'glass' }),
-  });
+  const CORNER_PRESETS = mkMap([
+    ['sharp', '3px', '5px', '8px', '8px', '10px'],
+    ['balanced', '6px', '9px', '12px', '14px', '14px'],
+    ['soft', '8px', '12px', '16px', '18px', '18px'],
+    ['pill', '10px', '15px', '20px', '22px', '22px'],
+  ], ([id, sm, md, lg, bubble, input]) => ({ id, sm, md, lg, bubble, input }));
 
+  const SURFACE_PRESETS = mkMap([['clean'], ['smoked'], ['paper'], ['glass']], ([id]) => ({ id }));
   const AMBIENT_GLOW_LEVELS = Object.freeze(['off', 'subtle', 'vivid']);
 
-  const ACCENT_PRESETS = Object.freeze({
-    follow: Object.freeze({ id: 'follow', swatch: null, dark: null, light: null }),
-    cobalt: Object.freeze({
-      id: 'cobalt',
-      swatch: '#3b82f6',
-      dark: Object.freeze({ primary: '#669df6', fg: '#081120', link: '#8ab4f8', ring: '#669df6' }),
-      light: Object.freeze({ primary: '#2563eb', fg: '#ffffff', link: '#1d4ed8', ring: '#2563eb' }),
-    }),
-    iris: Object.freeze({
-      id: 'iris',
-      swatch: '#8b5cf6',
-      dark: Object.freeze({ primary: '#a58af8', fg: '#130b26', link: '#c4b5fd', ring: '#a58af8' }),
-      light: Object.freeze({ primary: '#7c3aed', fg: '#ffffff', link: '#6d28d9', ring: '#7c3aed' }),
-    }),
-    amber: Object.freeze({
-      id: 'amber',
-      swatch: '#f59e0b',
-      dark: Object.freeze({ primary: '#f2b84b', fg: '#14120e', link: '#fcd34d', ring: '#f2b84b' }),
-      light: Object.freeze({ primary: '#b4502b', fg: '#ffffff', link: '#9a3f1e', ring: '#b4502b' }),
-    }),
-    emerald: Object.freeze({
-      id: 'emerald',
-      swatch: '#10b981',
-      dark: Object.freeze({ primary: '#34d399', fg: '#062018', link: '#6ee7b7', ring: '#34d399' }),
-      light: Object.freeze({ primary: '#047857', fg: '#ffffff', link: '#065f46', ring: '#047857' }),
-    }),
-    rose: Object.freeze({
-      id: 'rose',
-      swatch: '#f43f5e',
-      dark: Object.freeze({ primary: '#fb7185', fg: '#1c060b', link: '#fda4af', ring: '#fb7185' }),
-      light: Object.freeze({ primary: '#e11d48', fg: '#ffffff', link: '#be123c', ring: '#e11d48' }),
-    }),
-    mono: Object.freeze({
-      id: 'mono',
-      swatch: '#94a3b8',
-      dark: Object.freeze({ primary: '#d4d7e0', fg: '#0e0f14', link: '#e2e8f0', ring: '#cbd5e1' }),
-      light: Object.freeze({ primary: '#334155', fg: '#f8fafc', link: '#1e293b', ring: '#334155' }),
-    }),
-  });
+  const ACCENT_PRESETS = mkMap([
+    ['follow', null, null, null],
+    ['cobalt', '#3b82f6', ['#669df6', '#081120', '#8ab4f8'], ['#2563eb', '#ffffff', '#1d4ed8']],
+    ['iris', '#8b5cf6', ['#a58af8', '#130b26', '#c4b5fd'], ['#7c3aed', '#ffffff', '#6d28d9']],
+    ['amber', '#f59e0b', ['#f2b84b', '#14120e', '#fcd34d'], ['#b4502b', '#ffffff', '#9a3f1e']],
+    ['emerald', '#10b981', ['#34d399', '#062018', '#6ee7b7'], ['#047857', '#ffffff', '#065f46']],
+    ['rose', '#f43f5e', ['#fb7185', '#1c060b', '#fda4af'], ['#e11d48', '#ffffff', '#be123c']],
+    ['mono', '#94a3b8', ['#d4d7e0', '#0e0f14', '#e2e8f0'], ['#334155', '#f8fafc', '#1e293b']],
+  ], ([id, swatch, d, l]) => ({
+    id, swatch,
+    dark: d && Object.freeze({ primary: d[0], fg: d[1], link: d[2], ring: d[0] }),
+    light: l && Object.freeze({ primary: l[0], fg: l[1], link: l[2], ring: l[0] }),
+  }));
 
   function makeSkin(cfg) {
     const isLight = cfg.colorScheme === 'light';
@@ -287,38 +248,13 @@
     );
   }
 
-  const DENSITY_PRESETS = Object.freeze({
-    compact: Object.freeze({
-      id: 'compact',
-      fontSize: '13.5px',
-      lineHeight: '1.52',
-      messageGap: '8px',
-      blockPadY: '6px',
-      blockPadX: '10px',
-      paragraphGap: '0.5em',
-      codeFontSize: '12.5px',
-    }),
-    balanced: Object.freeze({
-      id: 'balanced',
-      fontSize: '14.5px',
-      lineHeight: '1.66',
-      messageGap: '14px',
-      blockPadY: '10px',
-      blockPadX: '14px',
-      paragraphGap: '0.72em',
-      codeFontSize: '13px',
-    }),
-    comfortable: Object.freeze({
-      id: 'comfortable',
-      fontSize: '15.5px',
-      lineHeight: '1.8',
-      messageGap: '20px',
-      blockPadY: '14px',
-      blockPadX: '18px',
-      paragraphGap: '0.95em',
-      codeFontSize: '13.5px',
-    }),
-  });
+  const DENSITY_PRESETS = mkMap([
+    ['compact', '13.5px', '1.52', '8px', '6px', '10px', '0.5em', '12.5px'],
+    ['balanced', '14.5px', '1.66', '14px', '10px', '14px', '0.72em', '13px'],
+    ['comfortable', '15.5px', '1.8', '20px', '14px', '18px', '0.95em', '13.5px'],
+  ], ([id, fontSize, lineHeight, messageGap, blockPadY, blockPadX, paragraphGap, codeFontSize]) => ({
+    id, fontSize, lineHeight, messageGap, blockPadY, blockPadX, paragraphGap, codeFontSize,
+  }));
 
   const DEFAULT_SETTINGS = Object.freeze({
     preset: 'native',
@@ -327,6 +263,7 @@
     corners: 'balanced',
     surface: 'smoked',
     codeFont: 'default',
+    chatFont: 'default',
     codeLigatures: false,
     ambientGlow: 'subtle',
     streamFade: true,
@@ -342,38 +279,31 @@
   function normalizeSettings(raw = {}, base = DEFAULT_SETTINGS) {
     const src = raw && typeof raw === 'object' ? raw : {};
     const prev = base && typeof base === 'object' ? base : DEFAULT_SETTINGS;
-
-    const pick = (table, cand, fallback) =>
-      Object.prototype.hasOwnProperty.call(table, String(cand ?? '')) ? String(cand) : fallback;
-
-    const preset = pick(THEME_PRESETS, src.preset !== undefined ? src.preset : prev.preset, 'native');
-    const density = pick(DENSITY_PRESETS, src.density !== undefined ? src.density : prev.density, 'balanced');
-    const accent = pick(ACCENT_PRESETS, src.accent !== undefined ? src.accent : prev.accent, 'follow');
-    const corners = pick(CORNER_PRESETS, src.corners !== undefined ? src.corners : prev.corners, 'balanced');
-    const surface = pick(SURFACE_PRESETS, src.surface !== undefined ? src.surface : prev.surface, 'smoked');
-    const codeFont = pick(CODE_FONT_PRESETS, src.codeFont !== undefined ? src.codeFont : prev.codeFont, 'default');
+    const pick = (t, k, fb) => {
+      const c = src[k] !== undefined ? src[k] : prev[k];
+      return Object.prototype.hasOwnProperty.call(t, String(c ?? '')) ? String(c) : fb;
+    };
+    const bool = (k, defTrue) => (src[k] !== undefined ? Boolean(src[k]) : defTrue ? prev[k] !== false : Boolean(prev[k]));
     const glowCand = src.ambientGlow !== undefined ? String(src.ambientGlow) : prev.ambientGlow;
-    const ambientGlow = AMBIENT_GLOW_LEVELS.includes(glowCand) ? glowCand : 'subtle';
     const policyCand = src.conflictPolicy !== undefined ? String(src.conflictPolicy) : prev.conflictPolicy;
-    const conflictPolicy = policyCand === 'takeover' ? 'takeover' : 'yield';
-
     return {
-      preset,
-      autoPair: src.autoPair !== undefined ? Boolean(src.autoPair) : Boolean(prev.autoPair),
-      accent,
-      corners,
-      surface,
-      codeFont,
-      codeLigatures: src.codeLigatures !== undefined ? Boolean(src.codeLigatures) : Boolean(prev.codeLigatures),
-      ambientGlow,
-      streamFade: src.streamFade !== undefined ? Boolean(src.streamFade) : prev.streamFade !== false,
-      smoothCaret: src.smoothCaret !== undefined ? Boolean(src.smoothCaret) : prev.smoothCaret !== false,
-      cjkFontTuning: src.cjkFontTuning !== undefined ? Boolean(src.cjkFontTuning) : Boolean(prev.cjkFontTuning),
-      density,
-      compactSidebar: src.compactSidebar !== undefined ? Boolean(src.compactSidebar) : Boolean(prev.compactSidebar),
-      wideReadable: src.wideReadable !== undefined ? Boolean(src.wideReadable) : Boolean(prev.wideReadable),
+      preset: pick(THEME_PRESETS, 'preset', 'native'),
+      autoPair: bool('autoPair'),
+      accent: pick(ACCENT_PRESETS, 'accent', 'follow'),
+      corners: pick(CORNER_PRESETS, 'corners', 'balanced'),
+      surface: pick(SURFACE_PRESETS, 'surface', 'smoked'),
+      codeFont: pick(CODE_FONT_PRESETS, 'codeFont', 'default'),
+      chatFont: pick(CHAT_FONT_PRESETS, 'chatFont', 'default'),
+      codeLigatures: bool('codeLigatures'),
+      ambientGlow: AMBIENT_GLOW_LEVELS.includes(glowCand) ? glowCand : 'subtle',
+      streamFade: bool('streamFade', true),
+      smoothCaret: bool('smoothCaret', true),
+      cjkFontTuning: bool('cjkFontTuning'),
+      density: pick(DENSITY_PRESETS, 'density', 'balanced'),
+      compactSidebar: bool('compactSidebar'),
+      wideReadable: bool('wideReadable'),
       customCss: src.customCss !== undefined ? String(src.customCss ?? '') : String(prev.customCss ?? ''),
-      conflictPolicy,
+      conflictPolicy: policyCand === 'takeover' ? 'takeover' : 'yield',
     };
   }
 
@@ -748,6 +678,9 @@
       out['--sdk-primary'] = acc.primary;
       out['--sag-accent'] = acc.primary;
     }
+    if (out['--primary']) {
+      out['--sag-theme-accent'] = out['--primary'];
+    }
     return out;
   }
 
@@ -760,156 +693,161 @@
     const densitySpec = DENSITY_PRESETS[settings.density] || DENSITY_PRESETS.balanced;
     const cornerSpec = CORNER_PRESETS[settings.corners] || CORNER_PRESETS.balanced;
     const codeFontSpec = CODE_FONT_PRESETS[settings.codeFont] || CODE_FONT_PRESETS.default;
+    const chatFontSpec = CHAT_FONT_PRESETS[settings.chatFont] || CHAT_FONT_PRESETS.default;
     const colorsYielded = Boolean(prismDetected && settings.conflictPolicy === 'yield');
     const effVars = colorsYielded ? null : buildEffectiveVars(presetSpec, settings.accent, effectiveScheme);
     const applyColors = Boolean(effVars);
+    const isNonNativeSkin = Boolean(!colorsYielded && presetSpec && presetSpec.id !== 'native' && presetSpec.vars);
 
     const blocks = [];
     const H = 'html[data-ag-sag-theme="1"]';
     const HC = `${H}[data-ag-sag-theme-colors="active"]`;
-    const mi = (p, s = '') => `${p} [data-testid="agent-input-box"]:not([data-testid*="floating"]):not([data-testid*="sidebar"])${s}`;
+    const dt = (k) => `[data-testid="${k}"]`;
+    const cm = (a, p, b = 'transparent') => `color-mix(in srgb,${a} ${p}%,${b})`;
+    const mi = (p, s = '') => `${p} ${dt('agent-input-box')}:not([data-testid*="floating"]):not([data-testid*="sidebar"])${s}`;
     const miEx = (p, s = '') =>
-      `${p} aside [data-testid="agent-input-box"]${s},${p} [data-testid="sidebar"] [data-testid="agent-input-box"]${s},${p} [data-testid="conversation-list-sidebar"] [data-testid="agent-input-box"]${s}`;
+      `${p} aside ${dt('agent-input-box')}${s},${p} ${dt('sidebar')} ${dt('agent-input-box')}${s},${p} ${dt('conversation-list-sidebar')} ${dt('agent-input-box')}${s}`;
 
-    // 1. Color tokens + Browser Hole transparency guard
     if (applyColors) {
-      const selector =
+      const sel =
         settings.conflictPolicy === 'takeover'
           ? `${H}[data-ag-sag-theme-policy="takeover"],:root[data-ag-sag-theme="1"][data-ag-sag-theme-policy="takeover"]`
           : `${HC},:root[data-ag-sag-theme="1"][data-ag-sag-theme-colors="active"]`;
-      const decls = [];
-      if (presetSpec?.colorScheme) decls.push(`color-scheme:${presetSpec.colorScheme};`);
+      const decls = presetSpec?.colorScheme ? [`color-scheme:${presetSpec.colorScheme};`] : [];
       for (const [k, v] of Object.entries(effVars)) decls.push(`${k}:${v};`);
-      blocks.push(`${selector}{${decls.join('')}}`);
+      blocks.push(`${sel}{${decls.join('')}}`);
       blocks.push(
         `${HC} body:not([data-has-browser-hole="true"]){background-color:var(--body-background,var(--background));color:var(--foreground);}` +
           `${HC} body[data-has-browser-hole="true"],${HC} [data-has-browser-hole="true"]{background-color:transparent!important;background-image:none!important;}` +
-          `${HC} aside,${HC} [data-testid="sidebar"]{background-color:var(--sidebar,var(--background));}` +
-          `${HC} [data-testid="auxiliary-pane"],${HC} [data-testid="subagents-panel"],${HC} [data-testid="background-tasks-panel"],${HC} [data-testid="files-changed-panel"],${HC} [data-testid="terminal-panel"]{background-color:var(--sidebar,var(--card,var(--background)));border-color:var(--border);}`
+          `${HC} aside,${HC} ${dt('sidebar')}{background-color:var(--sidebar,var(--background));}` +
+          `${['auxiliary-pane', 'subagents-panel', 'background-tasks-panel', 'files-changed-panel', 'terminal-panel'].map((k) => `${HC} ${dt(k)}`).join(',')}{background-color:var(--sidebar,var(--card,var(--background)));border-color:var(--border);}`
       );
     }
 
-    // 2. Corners geometry system
+    if (isNonNativeSkin) {
+      blocks.push(
+        `${HC} ${dt('titlebar')},${HC} .titlebar{background-color:var(--sidebar,var(--background));border-bottom:1px solid var(--border);}` +
+          `${HC} ${dt('conversation-row-sidebar')}[data-active="1"],${HC} ${dt('conversation-row-sidebar')}[aria-current="page"]{background-color:${cm('var(--sag-theme-accent,var(--primary))', 12, 'var(--sidebar-secondary,transparent)')};box-shadow:inset 2.5px 0 0 var(--sag-theme-accent,var(--primary));border-radius:var(--ag-sag-r-sm,6px);}` +
+          `${HC} ${dt('artifact-view')}{background-color:var(--card,var(--background));border:1px solid var(--card-border,var(--border));border-radius:var(--ag-sag-r-lg,12px);}` +
+          `${HC} .monaco-editor{background-color:var(--vscode-editor-background,var(--content,var(--background)));border:1px solid var(--border);border-radius:var(--ag-sag-r-md,9px);overflow:hidden;}` +
+          `${HC} .xterm{background-color:var(--sidebar,var(--card,var(--background)));border:1px solid var(--border);border-radius:var(--ag-sag-r-md,9px);padding:4px;}`
+      );
+    }
+
     blocks.push(
       `${H}{--ag-sag-r-sm:${cornerSpec.sm};--ag-sag-r-md:${cornerSpec.md};--ag-sag-r-lg:${cornerSpec.lg};--ag-sag-r-bubble:${cornerSpec.bubble};--ag-sag-r-input:${cornerSpec.input};}` +
-        `${H} [data-testid="user-message-bubble"]{border-radius:var(--ag-sag-r-bubble);}` +
-        `${mi(H)}{border-radius:var(--ag-sag-r-input);}` +
-        `${miEx(H)}{border-radius:revert;}` +
-        `${H} [data-testid="conversation-view"] pre,${H} [data-testid="auxiliary-pane"] pre,${H} [data-testid="terminal-panel"] pre{border-radius:var(--ag-sag-r-md);}`
+        `${H} ${dt('user-message-bubble')}{border-radius:var(--ag-sag-r-bubble);}${mi(H)}{border-radius:var(--ag-sag-r-input);}${miEx(H)}{border-radius:revert;}` +
+        `${['conversation-view', 'auxiliary-pane', 'terminal-panel'].map((k) => `${H} ${dt(k)} pre`).join(',')}{border-radius:var(--ag-sag-r-md);}`
     );
 
-    // 3. Surface polish (Smoked Obsidian / Paper Ink / Aurora Glass / Clean)
     if (settings.surface === 'smoked' && !colorsYielded) {
       const S = `${H}[data-ag-sag-theme-surface="smoked"]`;
-      const isLight = effectiveScheme === 'light';
-      const specHi = isLight ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.08)';
-      const cardSh = isLight
-        ? '0 1px 3px rgba(15,23,42,0.06),0 8px 24px -8px rgba(30,58,138,0.10)'
-        : 'inset 0 1px 0 rgba(255,255,255,0.07),0 8px 24px -10px rgba(0,0,0,0.48)';
-      const bubbleBg = isLight ? 'color-mix(in srgb,var(--card) 92%,var(--primary) 8%)' : 'color-mix(in srgb,var(--card) 94%,#fff 6%)';
+      const isL = effectiveScheme === 'light';
+      const specHi = isL ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.08)';
+      const sh = isL ? '0 1px 3px rgba(15,23,42,0.06),0 8px 24px -8px rgba(30,58,138,0.10)' : 'inset 0 1px 0 rgba(255,255,255,0.07),0 8px 24px -10px rgba(0,0,0,0.48)';
+      const bbg = isL ? cm('var(--card)', 92, 'var(--primary) 8%') : cm('var(--card)', 94, '#fff 6%');
       blocks.push(
-        `${S} [data-testid="user-message-bubble"]{background-color:${bubbleBg};border:1px solid var(--card-border,var(--border));box-shadow:${cardSh};padding:10px 15px;}` +
-          `${mi(S)}{background-color:var(--card);border:1px solid var(--card-border,var(--border));box-shadow:inset 0 1px 0 ${specHi},${cardSh};transition:border-color 140ms ease,box-shadow 140ms ease;}` +
-          `${mi(S, ':focus-within')}{border-color:color-mix(in srgb,var(--primary) 54%,var(--border));box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 18%,transparent),${cardSh};}` +
-          `${miEx(S)}{background-color:revert;border:revert;box-shadow:revert;transition:revert;}` +
-          `${miEx(S, ':focus-within')}{border-color:revert;box-shadow:revert;}` +
-          `${S} [data-testid="thinking-collapsible-trigger"]{background:transparent;border:0;border-left:2px solid color-mix(in srgb,var(--primary) 42%,transparent);padding-left:8px;color:var(--muted-foreground);}` +
-          `${S} [data-testid="changed-files-card"],${S} [data-testid="artifact-view"]{border:1px solid var(--card-border,var(--border));border-radius:var(--ag-sag-r-lg);box-shadow:${cardSh};}` +
-          `${S} [data-testid="auxiliary-pane"],${S} [data-testid="terminal-panel"]{border-left:1px solid var(--card-border,var(--border));}` +
-          `${S} ::selection{background-color:color-mix(in srgb,var(--primary) 26%,transparent);}`
+        `${S} ${dt('user-message-bubble')}{background-color:${bbg};border:1px solid var(--card-border,var(--border));box-shadow:${sh};padding:10px 15px;}` +
+          `${mi(S)}{background-color:var(--card);border:1px solid var(--card-border,var(--border));box-shadow:inset 0 1px 0 ${specHi},${sh};transition:border-color 140ms ease,box-shadow 140ms ease;}` +
+          `${mi(S, ':focus-within')}{border-color:${cm('var(--primary)', 54, 'var(--border)')};box-shadow:0 0 0 2px ${cm('var(--primary)', 18)},${sh};}` +
+          `${miEx(S)}{background-color:revert;border:revert;box-shadow:revert;transition:revert;}${miEx(S, ':focus-within')}{border-color:revert;box-shadow:revert;}` +
+          `${S} ${dt('thinking-collapsible-trigger')}{background:transparent;border:0;border-left:2px solid ${cm('var(--primary)', 42)};padding-left:8px;color:var(--muted-foreground);}` +
+          `${S} ${dt('changed-files-card')},${S} ${dt('artifact-view')}{border:1px solid var(--card-border,var(--border));border-radius:var(--ag-sag-r-lg);box-shadow:${sh};}` +
+          `${S} ${dt('auxiliary-pane')},${S} ${dt('terminal-panel')}{border-left:1px solid var(--card-border,var(--border));}` +
+          `${S} ::selection{background-color:${cm('var(--primary)', 26)};}`
       );
     } else if (settings.surface === 'paper' && !colorsYielded) {
       const S = `${H}[data-ag-sag-theme-surface="paper"]`;
       blocks.push(
-        `${S} [data-testid="user-message-bubble"]{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:2px 2px 0 color-mix(in srgb,var(--foreground) 12%,transparent);padding:10px 15px;}` +
-          `${mi(S)}{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:0 2px 0 color-mix(in srgb,var(--foreground) 10%,transparent);}` +
-          `${miEx(S)}{background-color:revert;border:revert;box-shadow:revert;}` +
-          `${S} [data-testid="thinking-collapsible-trigger"]{border-left:2px dashed color-mix(in srgb,var(--primary) 55%,transparent);padding-left:8px;}`
+        `${S} ${dt('user-message-bubble')}{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:2px 2px 0 ${cm('var(--foreground)', 12)};padding:10px 15px;}` +
+          `${mi(S)}{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:0 2px 0 ${cm('var(--foreground)', 10)};}${miEx(S)}{background-color:revert;border:revert;box-shadow:revert;}` +
+          `${S} ${dt('thinking-collapsible-trigger')}{border-left:2px dashed ${cm('var(--primary)', 55)};padding-left:8px;}`
       );
     } else if (settings.surface === 'glass' && !colorsYielded) {
       const S = `${H}[data-ag-sag-theme-surface="glass"]`;
+      const gl = isNonNativeSkin
+        ? `${S} [role="dialog"],${S} ${dt('ag-sg-status-card')},${S} ${dt('ag-sag-drawer')}{background:${cm('var(--popover,var(--card))', 82)};backdrop-filter:blur(14px) saturate(1.15);-webkit-backdrop-filter:blur(14px) saturate(1.15);}`
+        : '';
       blocks.push(
-        `${S} [data-testid="user-message-bubble"]{background:linear-gradient(145deg,color-mix(in srgb,var(--card) 82%,var(--primary) 18%),color-mix(in srgb,var(--card) 92%,transparent));border:1px solid color-mix(in srgb,var(--primary) 34%,var(--border));box-shadow:inset 0 1px 0 rgba(255,255,255,0.22),0 10px 28px -12px color-mix(in srgb,var(--primary) 32%,rgba(0,0,0,0.45));padding:10px 15px;}` +
-          `${mi(S)}{background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid color-mix(in srgb,var(--primary) 36%,var(--border));box-shadow:inset 0 1px 0 rgba(255,255,255,0.20),0 12px 32px -12px color-mix(in srgb,var(--primary) 26%,rgba(0,0,0,0.4));}` +
-          `${miEx(S)}{background:revert;border:revert;box-shadow:revert;}`
+        `${S} ${dt('user-message-bubble')}{background:linear-gradient(145deg,${cm('var(--card)', 82, 'var(--primary) 18%')},${cm('var(--card)', 92)});border:1px solid ${cm('var(--primary)', 34, 'var(--border)')};box-shadow:inset 0 1px 0 rgba(255,255,255,0.22),0 10px 28px -12px ${cm('var(--primary)', 32, 'rgba(0,0,0,0.45)')};padding:10px 15px;}` +
+          `${mi(S)}{background:${cm('var(--card)', 88)};border:1px solid ${cm('var(--primary)', 36, 'var(--border)')};box-shadow:inset 0 1px 0 rgba(255,255,255,0.20),0 12px 32px -12px ${cm('var(--primary)', 26, 'rgba(0,0,0,0.4)')};}${miEx(S)}{background:revert;border:revert;box-shadow:revert;}` +
+          gl
       );
     }
 
-    // Thin unobtrusive scrollbars
+    const sbT = ['pre', 'aside', dt('conversation-view'), dt('auxiliary-pane')];
     blocks.push(
-      `${H} pre::-webkit-scrollbar,${H} aside::-webkit-scrollbar,${H} [data-testid="conversation-view"]::-webkit-scrollbar,${H} [data-testid="auxiliary-pane"]::-webkit-scrollbar{width:6px;height:6px;}` +
-        `${H} pre::-webkit-scrollbar-thumb,${H} aside::-webkit-scrollbar-thumb,${H} [data-testid="conversation-view"]::-webkit-scrollbar-thumb,${H} [data-testid="auxiliary-pane"]::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--foreground,#94a3b8) 20%,transparent);border-radius:999px;}`
+      `${sbT.map((x) => `${H} ${x}::-webkit-scrollbar`).join(',')}{width:6px;height:6px;}` +
+        `${sbT.map((x) => `${H} ${x}::-webkit-scrollbar-thumb`).join(',')}{background:${cm('var(--foreground,#94a3b8)', 20)};border-radius:999px;}`
     );
 
-    // 4. Typography: CJK + Code Font + Ligatures
     const monoStack = codeFontSpec.stack || (settings.cjkFontTuning ? CJK_MONO_STACK : null);
     if (settings.cjkFontTuning) {
       const C = `${H}[data-ag-sag-theme-cjk="1"]`;
       blocks.push(
-        `${C}{--ag-sag-font-sans:${CJK_SANS_STACK};--font-sans:${CJK_SANS_STACK};}` +
-          `${C} body,${C} [data-testid="conversation-view"]{font-family:var(--ag-sag-font-sans);text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;}`
+        `${C}{--ag-sag-font-sans:${CJK_SANS_STACK};--font-sans:${CJK_SANS_STACK};}${C} body,${C} ${dt('conversation-view')}{font-family:var(--ag-sag-font-sans);text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;}`
+      );
+    }
+    if (chatFontSpec.stack) {
+      const CF = `${H}[data-ag-sag-theme-chat-font="${chatFontSpec.id}"]`;
+      blocks.push(
+        `${CF}{--ag-sag-chat-font:${chatFontSpec.stack};}${['conversation-view', 'user-message-bubble', 'agent-response', 'planner-response-text'].map((k) => `${CF} ${dt(k)}`).join(',')}{font-family:var(--ag-sag-chat-font);}`
       );
     }
     if (monoStack || settings.codeLigatures) {
       const fvl = settings.codeLigatures ? 'contextual common-ligatures' : 'none';
       const ffs = settings.codeLigatures ? '"calt" 1, "liga" 1' : '"calt" 0, "liga" 0';
-      const monoDecl = monoStack ? `${H}{--ag-sag-font-mono:${monoStack};--font-mono:${monoStack};}` : '';
-      const ff = monoStack ? 'font-family:var(--ag-sag-font-mono);' : '';
       blocks.push(
-        `${monoDecl}${H} pre,${H} code,${H} kbd,${H} samp{${ff}font-variant-ligatures:${fvl};font-feature-settings:${ffs};}`
+        `${monoStack ? `${H}{--ag-sag-font-mono:${monoStack};--font-mono:${monoStack};}` : ''}${H} pre,${H} code,${H} kbd,${H} samp{${monoStack ? 'font-family:var(--ag-sag-font-mono);' : ''}font-variant-ligatures:${fvl};font-feature-settings:${ffs};}`
       );
     }
 
-    // 5. Density layout
     blocks.push(
       `${H}{--ag-sag-font-size:${densitySpec.fontSize};--ag-sag-line-height:${densitySpec.lineHeight};--ag-sag-message-gap:${densitySpec.messageGap};--ag-sag-block-pad-y:${densitySpec.blockPadY};--ag-sag-block-pad-x:${densitySpec.blockPadX};--ag-sag-paragraph-gap:${densitySpec.paragraphGap};--ag-sag-code-font-size:${densitySpec.codeFontSize};}` +
-        `${H} [data-testid="conversation-view"]{gap:var(--ag-sag-message-gap);}` +
-        `${H} [data-testid="user-message-bubble"],${H} [data-testid="agent-response"],${H} [data-testid="planner-response-text"]{font-size:var(--ag-sag-font-size);line-height:var(--ag-sag-line-height);padding-top:var(--ag-sag-block-pad-y);padding-bottom:var(--ag-sag-block-pad-y);}` +
-        `${H} [data-testid="agent-response"] p,${H} [data-testid="planner-response-text"] p{margin-bottom:var(--ag-sag-paragraph-gap);}` +
-        `${H} [data-testid="conversation-view"] pre code{font-size:var(--ag-sag-code-font-size);}`
+        `${H} ${dt('conversation-view')}{gap:var(--ag-sag-message-gap);}` +
+        `${['user-message-bubble', 'agent-response', 'planner-response-text'].map((k) => `${H} ${dt(k)}`).join(',')}{font-size:var(--ag-sag-font-size);line-height:var(--ag-sag-line-height);padding-top:var(--ag-sag-block-pad-y);padding-bottom:var(--ag-sag-block-pad-y);}` +
+        `${H} ${dt('agent-response')} p,${H} ${dt('planner-response-text')} p{margin-bottom:var(--ag-sag-paragraph-gap);}` +
+        `${H} ${dt('conversation-view')} pre code{font-size:var(--ag-sag-code-font-size);}`
     );
 
-    // 6. 0fps CSS Semantic Horizon Glow (dedicated owned node, zero WebGL / zero VRAM / Browser Hole safe)
     if (settings.ambientGlow !== 'off' && !colorsYielded) {
       const m = settings.ambientGlow === 'vivid' ? 0.24 : 0.13;
+      const dual = (c1, c2) => `radial-gradient(58% 100% at 36% 100%,${c1},transparent 70%),radial-gradient(54% 92% at 68% 100%,${c2},transparent 74%)`;
+      const glSt = (st, f, c1, c2) => `${H}[data-ag-sag-conv-state="${st}"] .ag-sag-ambient-glow{opacity:${(m * f).toFixed(2)};background:${dual(c1, c2)};}`;
       blocks.push(
-        `.ag-sag-ambient-glow{position:fixed;left:0;right:0;bottom:0;height:88px;pointer-events:none;z-index:2;opacity:0;transition:opacity 360ms ease;}` +
-          `${H}[data-ag-sag-conv-state="running"] .ag-sag-ambient-glow{opacity:${(m * 1.15).toFixed(2)};background:radial-gradient(62% 100% at 50% 100%,var(--primary,#38bdf8),transparent 72%);}` +
-          `${H}[data-ag-sag-conv-state="awaiting"] .ag-sag-ambient-glow{opacity:${(m * 1.25).toFixed(2)};background:radial-gradient(62% 100% at 50% 100%,var(--warning,#fbbf24),transparent 72%);}` +
-          `${H}[data-ag-sag-conv-state="error"] .ag-sag-ambient-glow{opacity:${(m * 1.3).toFixed(2)};background:radial-gradient(62% 100% at 50% 100%,var(--error,#f87171),transparent 72%);}` +
-          `${H} body[data-has-browser-hole="true"] .ag-sag-ambient-glow{display:none!important;}`
+        `.ag-sag-ambient-glow{position:fixed;left:0;right:0;bottom:0;height:92px;pointer-events:none;z-index:2;opacity:0;transition:opacity 360ms ease;}` +
+          glSt('running', 1.15, 'var(--primary,#38bdf8)', 'var(--link,#8ab4f8)') +
+          glSt('awaiting', 1.25, 'var(--warning,#fbbf24)', cm('var(--warning,#fbbf24)', 62, 'var(--primary,#38bdf8)')) +
+          glSt('error', 1.3, 'var(--error,#f87171)', cm('var(--error,#f87171)', 58, 'var(--warning,#fbbf24)')) +
+          glSt('completed', 1.05, 'var(--success,#34d399)', cm('var(--success,#34d399)', 55, 'var(--primary,#38bdf8)')) +
+          `${H}[data-ag-sag-hibernated="1"] .ag-sag-ambient-glow{opacity:0!important;transition:none!important;}` +
+          `${H} body[data-has-browser-hole="true"] .ag-sag-ambient-glow{display:none!important;}@media (prefers-reduced-motion:reduce){.ag-sag-ambient-glow{transition:none;}}`
       );
     }
 
-    // 7. Velvet Stream Feathering (CSS.highlights 5-step ink fade, zero DOM wrap)
     if (settings.streamFade && !colorsYielded) {
-      blocks.push(
-        [20, 40, 62, 82, 94].map((p, i) => `::highlight(ag-sag-sf${i}){color:color-mix(in srgb,currentColor ${p}%,transparent);}`).join('')
-      );
+      blocks.push([20, 40, 62, 82, 94].map((p, i) => `::highlight(ag-sag-sf${i}){color:${cm('currentColor', p)};}`).join(''));
     }
 
-    // 8. FastDOM Smooth Caret (body-mounted fixed overlay, zero host DOM intrusion)
     if (settings.smoothCaret && !colorsYielded) {
       blocks.push(
         `[data-ag-sag-smooth-caret="1"]{caret-color:transparent!important;}` +
-          `.ag-sag-smooth-caret{position:fixed;top:0;left:0;width:2px;border-radius:999px;pointer-events:none;z-index:2147483040;background:var(--primary,#38bdf8);box-shadow:0 0 8px color-mix(in srgb,var(--primary,#38bdf8) 55%,transparent);opacity:0;transition:transform 75ms cubic-bezier(0.22,1,0.36,1),height 75ms ease,opacity 110ms ease;}` +
+          `.ag-sag-smooth-caret{position:fixed;top:0;left:0;width:2px;border-radius:999px;pointer-events:none;z-index:2147483040;background:var(--primary,#38bdf8);box-shadow:0 0 8px ${cm('var(--primary,#38bdf8)', 55)};opacity:0;transition:transform 75ms cubic-bezier(0.22,1,0.36,1),height 75ms ease,opacity 110ms ease;}` +
           `.ag-sag-smooth-caret[data-visible="1"]{opacity:1;will-change:transform,height,opacity;}@media (prefers-reduced-motion:reduce){.ag-sag-smooth-caret{transition:none;}}`
       );
     }
 
-    // 9. Compact Sidebar & Wide Readable
     if (settings.compactSidebar) {
       const B = `${H}[data-ag-sag-theme-sidebar="1"]`;
       blocks.push(
-        `${B} aside a,${B} [data-testid="sidebar"] a,${B} [data-testid="conversation-list"] li,${B} [data-testid="conversation-list"] a{min-height:28px;padding-top:3px;padding-bottom:3px;line-height:1.3;}` +
-          `${B} [data-testid="conversation-list"]{gap:2px;}`
+        `${B} aside a,${B} ${dt('sidebar')} a,${B} ${dt('conversation-list')} li,${B} ${dt('conversation-list')} a{min-height:28px;padding-top:3px;padding-bottom:3px;line-height:1.3;}${B} ${dt('conversation-list')}{gap:2px;}`
       );
     }
 
     if (settings.wideReadable) {
       const W = `${H}[data-ag-sag-theme-wide="1"]`;
       blocks.push(
-        `${W} [data-testid="conversation-view"],${W} [data-testid="agent-response"],${W} [data-testid="planner-response-text"],${W} [data-testid="conversation-view"] .prose{max-width:min(1180px, 94%);}`
+        `${W} ${dt('conversation-view')},${W} ${dt('agent-response')},${W} ${dt('planner-response-text')},${W} ${dt('conversation-view')} .prose{max-width:min(1180px, 94%);}`
       );
     }
 
@@ -995,19 +933,29 @@
     let schemeRaf = 0;
     let lastObservedHostScheme = null;
 
+    function syncHibernatedAttr() {
+      const html = doc?.documentElement;
+      if (!html) return;
+      if (enabled && !destroyed && isHibernated()) html.setAttribute?.('data-ag-sag-hibernated', '1');
+      else html.removeAttribute?.('data-ag-sag-hibernated');
+    }
+
     function bindWindowFocusWatcher() {
       if (winFocusOff) return;
       const offs = [];
       const onBlur = () => {
         winBlurred = true;
+        syncHibernatedAttr();
         clearStreamFade();
         if (caretActive) scheduleCaretUpdate();
       };
       const onFocus = () => {
         winBlurred = false;
+        syncHibernatedAttr();
         if (caretActive) scheduleCaretUpdate();
       };
       const onVis = () => {
+        syncHibernatedAttr();
         if (isHibernated()) clearStreamFade();
         if (caretActive) scheduleCaretUpdate();
       };
@@ -1634,6 +1582,7 @@
             }
             schemeInFlight = true;
             try {
+              syncHibernatedAttr();
               if (isHibernated()) {
                 clearStreamFade();
                 if (caretActive) scheduleCaretUpdate();
@@ -1709,7 +1658,7 @@
     }
 
     function setConvState(nextState) {
-      const allowed = ['idle', 'running', 'awaiting', 'error'];
+      const allowed = ['idle', 'running', 'awaiting', 'error', 'completed'];
       const normalized = allowed.includes(nextState) ? nextState : 'idle';
       lastConvState = normalized;
       const html = doc?.documentElement;
@@ -1852,22 +1801,27 @@
 
       const html = doc?.documentElement;
       if (html && typeof html.setAttribute === 'function') {
-        html.setAttribute('data-ag-sag-theme', '1');
-        html.setAttribute('data-ag-sag-theme-preset', settings.preset);
-        html.setAttribute('data-ag-sag-theme-resolved', lastResolvedPreset);
-        html.setAttribute('data-ag-sag-theme-scheme', effectiveScheme);
-        html.setAttribute('data-ag-sag-theme-density', settings.density);
-        html.setAttribute('data-ag-sag-theme-accent', settings.accent);
-        html.setAttribute('data-ag-sag-theme-corners', settings.corners);
-        html.setAttribute('data-ag-sag-theme-surface', settings.surface);
-        html.setAttribute('data-ag-sag-theme-code-font', settings.codeFont);
-        html.setAttribute('data-ag-sag-theme-ligatures', settings.codeLigatures ? '1' : '0');
-        html.setAttribute('data-ag-sag-theme-glow', settings.ambientGlow);
-        html.setAttribute('data-ag-sag-theme-policy', settings.conflictPolicy);
-        html.setAttribute('data-ag-sag-theme-colors', colorsState);
-        html.setAttribute('data-ag-sag-theme-cjk', settings.cjkFontTuning ? '1' : '0');
-        html.setAttribute('data-ag-sag-theme-sidebar', settings.compactSidebar ? '1' : '0');
-        html.setAttribute('data-ag-sag-theme-wide', settings.wideReadable ? '1' : '0');
+        const attrs = [
+          ['data-ag-sag-theme', '1'],
+          ['data-ag-sag-theme-preset', settings.preset],
+          ['data-ag-sag-theme-resolved', lastResolvedPreset],
+          ['data-ag-sag-theme-scheme', effectiveScheme],
+          ['data-ag-sag-theme-density', settings.density],
+          ['data-ag-sag-theme-accent', settings.accent],
+          ['data-ag-sag-theme-corners', settings.corners],
+          ['data-ag-sag-theme-surface', settings.surface],
+          ['data-ag-sag-theme-code-font', settings.codeFont],
+          ['data-ag-sag-theme-chat-font', settings.chatFont],
+          ['data-ag-sag-theme-ligatures', settings.codeLigatures ? '1' : '0'],
+          ['data-ag-sag-theme-glow', settings.ambientGlow],
+          ['data-ag-sag-theme-policy', settings.conflictPolicy],
+          ['data-ag-sag-theme-colors', colorsState],
+          ['data-ag-sag-theme-cjk', settings.cjkFontTuning ? '1' : '0'],
+          ['data-ag-sag-theme-sidebar', settings.compactSidebar ? '1' : '0'],
+          ['data-ag-sag-theme-wide', settings.wideReadable ? '1' : '0'],
+        ];
+        for (const [k, v] of attrs) html.setAttribute(k, v);
+        syncHibernatedAttr();
         if (settings.ambientGlow !== 'off' && !surfaceYielded && lastConvState !== 'idle') {
           html.setAttribute('data-ag-sag-conv-state', lastConvState);
         } else {
@@ -1986,6 +1940,7 @@
     CORNER_PRESETS,
     SURFACE_PRESETS,
     CODE_FONT_PRESETS,
+    CHAT_FONT_PRESETS,
     AMBIENT_GLOW_LEVELS,
     DENSITY_PRESETS,
     DEFAULT_SETTINGS,

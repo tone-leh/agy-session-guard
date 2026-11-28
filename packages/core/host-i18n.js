@@ -9,7 +9,23 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const ATTR_WHITELIST = Object.freeze(['placeholder', 'title', 'aria-label']);
+  const ATTR_WHITELIST = Object.freeze([
+    'placeholder',
+    'title',
+    'aria-label',
+    'data-tooltip',
+    'alt',
+    'aria-description',
+  ]);
+
+  const CHAT_PROSE_SELECTORS = Object.freeze([
+    '[data-testid="user-message-bubble"]',
+    '[data-testid="user-message-content"]',
+    '[data-testid="planner-response-text"]',
+    '[data-testid="agent-response"]',
+    '[data-testid="conversation-row-sidebar"]',
+    '[data-testid="terminal-output"]',
+  ]);
 
   const HARD_SKIP_SELECTORS = Object.freeze([
     'code',
@@ -44,6 +60,7 @@
     '[data-testid="user-message-content"]',
     '[data-testid="planner-response-text"]',
     '[data-testid="agent-response"]',
+    '[data-testid="terminal-output"]',
     '[data-testid="branch-pill-trigger"]',
     '[data-testid="workspace-name"]',
     '[data-ag-no-i18n="1"]',
@@ -89,8 +106,15 @@
     'user-message-content',
     'planner-response-text',
     'agent-response',
+    'terminal-output',
     'branch-pill-trigger',
     'workspace-name',
+  ]);
+
+  // Containers whose inner text nodes (e.g. user conversation titles) must stay untranslated,
+  // while descendant action buttons' whitelisted attributes (aria-label/title/data-tooltip) remain translatable.
+  const TEXT_ONLY_SKIP_TESTIDS = new Set([
+    'conversation-row-sidebar',
   ]);
 
   const SLASH_COMMAND_RE = /^\/[a-z0-9_-]+$/i;
@@ -100,8 +124,43 @@
   const MAX_MISSING_PHRASES = 500;
   const MIN_LOWERCASE_LOOKUP_LEN = 4;
   const MAX_NODES_PER_FLUSH = 600;
+  const MAX_FRAME_BUDGET_MS = 5;
+  const MIN_NODES_BEFORE_TIME_YIELD = 40;
+  const CONFLICT_WINDOW_MS = 1500;
+  const CONFLICT_REWRITE_THRESHOLD = 3;
   const SWEEP_FLUSH_INTERVAL = 100;
   const SWEEP_REF_THRESHOLD = 500;
+
+  // Fallback suffix patterns (linear time, zero ReDoS)
+  const TRAILING_PUNCT_RE = /^(.+?)(\s*(?:\.{3}|[:：…\.!！?？]))$/;
+  const SHORTCUT_SUFFIX_RE =
+    /^(.+?)(\s+(?:\(?(?:(?:[⌘⇧⌥⌃]{1,4}(?:[A-Za-z0-9,./;'\[\]\\`\-=]|F(?:1[0-2]|[1-9])|[↵↩⇥⌫⌦⎋↑↓←→]))|(?:(?:Ctrl|Cmd|Command|Shift|Alt|Opt|Option|Meta|Super)(?:\+(?:Ctrl|Cmd|Command|Shift|Alt|Opt|Option|Meta|Super)){0,3}\+(?:[A-Za-z0-9,./;'\[\]\\`\-=]|F(?:1[0-2]|[1-9])|Enter|Return|Tab|Esc|Escape|Space|Backspace|Delete|Up|Down|Left|Right|Home|End|PageUp|PageDown)))\)?))$/;
+
+  // Step command line / file path guard patterns (linear time, case-sensitive on CLI commands to protect UI prose)
+  const STEP_CMD_PREFIX_RE =
+    /^(?:git|npm|npx|pnpm|yarn|bun|node|deno|python|python3|pip|pip3|uv|cargo|rustc|go|make|cmake|docker|kubectl|curl|wget|ssh|scp|rsync|ls|cd|pwd|cat|head|tail|grep|rg|ag|find|fd|sed|awk|chmod|chown|mkdir|rm|cp|mv|touch|echo|printf|export|env|kill|ps|lsof|tar|zip|unzip|sh|bash|zsh|sudo|brew|apt|yum|dnf|systemctl|launchctl|sqlite3|psql|mysql|redis-cli)\s+\S/;
+  const STEP_CLI_FLAG_RE = /(?:^|\s)--[A-Za-z][A-Za-z0-9-]*(?:=|\s|$)/;
+  const STEP_SHELL_OP_RE = /(?:&&|\|\||\S\s*\|\s*\S)/;
+  const STEP_ABS_OR_REL_PATH_RE = /^(?:~\/|\.{1,2}\/|\/[A-Za-z0-9._-]+(?:\/|$)|[A-Za-z]:\\)/;
+  const STEP_EXT_PATH_RE =
+    /(?:^|\s)[A-Za-z0-9._@-]+(?:[\/\\][A-Za-z0-9._@-]+)+\.[A-Za-z][A-Za-z0-9]{0,7}(?:[:#]\d+(?::\d+)?)?(?:\s|$)/;
+  const STEP_MULTI_SEG_PATH_RE =
+    /(?:^|\s)[A-Za-z0-9._@-]+(?:[\/\\][A-Za-z0-9._@-]+){2,}(?:\s|$)/;
+
+  function looksLikeStepPathOrCmd(str) {
+    if (typeof str !== 'string') return false;
+    const s = str.trim();
+    if (s.length < 3) return false;
+    if (STEP_CMD_PREFIX_RE.test(s)) return true;
+    if (STEP_CLI_FLAG_RE.test(s)) return true;
+    if (STEP_SHELL_OP_RE.test(s)) return true;
+    if (s.includes('/') || s.includes('\\')) {
+      if (STEP_ABS_OR_REL_PATH_RE.test(s)) return true;
+      if (STEP_EXT_PATH_RE.test(s)) return true;
+      if (STEP_MULTI_SEG_PATH_RE.test(s)) return true;
+    }
+    return false;
+  }
 
   // Missing-phrase safety filters (exclude secrets, paths, URLs, emails, non-ASCII, UUIDs, pure numbers)
   const NON_ENGLISH_CHAR_RE = /[^\x20-\x7E\u2018-\u201F\u2013-\u2014\u2026\u00B7]/;
@@ -216,6 +275,12 @@
     return false;
   }
 
+  function isTextOnlySkipElement(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const testId = getAttr(el, 'data-testid');
+    return Boolean(testId && TEXT_ONLY_SKIP_TESTIDS.has(testId));
+  }
+
   function isShadowHostSkipped(el) {
     if (!el || el.nodeType !== 1) return true;
     if (el.id === 'ag-prism-pulse-bar' || getAttr(el, 'id') === 'ag-prism-pulse-bar') return true;
@@ -231,7 +296,7 @@
   }
 
   // Checks strict ancestor chain of `node` (including across Shadow DOM host boundaries).
-  // When forContent=true, also treats editable/form ancestors (textarea/input/contenteditable/lexical-editor) as skipped.
+  // When forContent=true, also treats editable/form & text-only-skip (conversation-row-sidebar) ancestors as skipped.
   function hasSkippedAncestor(node, forContent) {
     let cur = node;
     while (cur) {
@@ -244,7 +309,37 @@
       }
       if (!cur || cur.nodeType !== 1) break;
       if (isHardSkipAllElement(cur)) return true;
-      if (forContent && isEditableContentSkipElement(cur)) return true;
+      if (forContent && (isEditableContentSkipElement(cur) || isTextOnlySkipElement(cur))) return true;
+    }
+    return false;
+  }
+
+  function hasEditableAncestor(node) {
+    let cur = node;
+    while (cur) {
+      const pn = cur.parentNode;
+      if (pn && pn.host && pn.host.nodeType === 1) {
+        cur = pn.host;
+      } else {
+        cur = cur.parentElement || (pn && pn.nodeType === 1 ? pn : null);
+      }
+      if (!cur || cur.nodeType !== 1) break;
+      if (isEditableContentSkipElement(cur)) return true;
+    }
+    return false;
+  }
+
+  function hasTextOnlySkipAncestor(node) {
+    let cur = node;
+    while (cur) {
+      const pn = cur.parentNode;
+      if (pn && pn.host && pn.host.nodeType === 1) {
+        cur = pn.host;
+      } else {
+        cur = cur.parentElement || (pn && pn.nodeType === 1 ? pn : null);
+      }
+      if (!cur || cur.nodeType !== 1) break;
+      if (isTextOnlySkipElement(cur)) return true;
     }
     return false;
   }
@@ -403,12 +498,56 @@
     const textRefMap = new WeakMap(); // TextNode -> WeakRef<TextNode>
     const trackedTextRefs = new Set();
 
+    // Per-TextNode React write-conflict breaker (resets on restoreAll / setLocale / destroy)
+    let exemptNodes = new WeakSet();
+    let nodeConflictTrack = new WeakMap(); // TextNode -> { count, windowStart }
+    let exemptCount = 0;
+
     const attrRecords = new WeakMap(); // Element -> Map<attr, { orig, translated }>
     let trackedAttrSet = new WeakSet();
     const attrRefMap = new WeakMap(); // Element -> WeakRef<Element>
     const trackedAttrRefs = new Set();
     let flushesSinceSweep = 0;
     let sweepCount = 0;
+
+    function nowMs() {
+      if (typeof win?.performance?.now === 'function') return win.performance.now();
+      if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
+      return Date.now();
+    }
+
+    function resetConflictExemption() {
+      exemptNodes = new WeakSet();
+      nodeConflictTrack = new WeakMap();
+      exemptCount = 0;
+    }
+
+    function createSliceBudget() {
+      return {
+        remaining: MAX_NODES_PER_FLUSH,
+        processed: 0,
+        startMs: nowMs(),
+        exhausted: false,
+        overflow: [],
+      };
+    }
+
+    function isBudgetExhausted(budget) {
+      if (!budget) return false;
+      if (budget.exhausted) return true;
+      if (budget.remaining <= 0) {
+        budget.exhausted = true;
+        return true;
+      }
+      if (
+        budget.processed >= MIN_NODES_BEFORE_TIME_YIELD &&
+        nowMs() - budget.startMs >= MAX_FRAME_BUDGET_MS
+      ) {
+        budget.exhausted = true;
+        return true;
+      }
+      return false;
+    }
 
     // MutationObserver & batched scheduling state
     const observers = [];
@@ -528,11 +667,24 @@
       missingSet.add(core);
     }
 
-    // Core 3-tier lookup for a trimmed non-empty string. Returns translated string or null on miss.
+    function lookupExactOrLower(str) {
+      if (!str || keepExactSet.has(str) || SLASH_COMMAND_RE.test(str)) return undefined;
+      let hit = exactMap.get(str);
+      if (hit === undefined && str.length >= MIN_LOWERCASE_LOOKUP_LEN) {
+        const lc = str.toLowerCase();
+        if (!keepLowerSet.has(lc)) {
+          hit = lowerMap.get(lc);
+        }
+      }
+      return hit;
+    }
+
+    // Core 3-tier + safe suffix-stripping lookup for a trimmed non-empty string. Returns translated string or null on miss.
     function lookupCore(core) {
       if (!core || currentLocale === 'en') return null;
       if (SLASH_COMMAND_RE.test(core)) return null;
       if (keepExactSet.has(core)) return null;
+      if (looksLikeStepPathOrCmd(core)) return null;
 
       if (lookupCache.has(core)) {
         const cached = lookupCache.get(core);
@@ -543,16 +695,8 @@
         return cached;
       }
 
-      // Tier 1: exact O(1)
-      let hit = exactMap.get(core);
-
-      // Tier 2: lowercase O(1) (excluding short ambiguous words)
-      if (hit === undefined && core.length >= MIN_LOWERCASE_LOOKUP_LEN) {
-        const lc = core.toLowerCase();
-        if (!keepLowerSet.has(lc)) {
-          hit = lowerMap.get(lc);
-        }
-      }
+      // Tier 1 & Tier 2: exact O(1) + lowercase O(1) (excluding short ambiguous words)
+      let hit = lookupExactOrLower(core);
 
       // Tier 3: compiled regex patterns with safe placeholder substitution
       if (hit === undefined && compiledPatterns.length > 0) {
@@ -562,6 +706,38 @@
           if (match) {
             hit = applyPatternTemplate(entry.replace, match);
             break;
+          }
+        }
+      }
+
+      // Tier 4a: trailing keyboard shortcut suffix stripping (e.g. "Search ⌘K", "Copy Ctrl+C", "Command Palette ⇧⌘P")
+      if (hit === undefined) {
+        const sm = SHORTCUT_SUFFIX_RE.exec(core);
+        if (sm) {
+          const base = sm[1];
+          const suffix = sm[2];
+          const suffixTrim = suffix.trim();
+          const parensBalanced = suffixTrim.startsWith('(') === suffixTrim.endsWith(')');
+          if (parensBalanced && base.length >= 2) {
+            const baseHit = lookupExactOrLower(base);
+            if (baseHit !== undefined && baseHit !== base) {
+              hit = baseHit + suffix;
+            }
+          }
+        }
+      }
+
+      // Tier 4b: trailing punctuation stripping (e.g. "Settings:", "Archived.", "Thinking…")
+      if (hit === undefined) {
+        const pm = TRAILING_PUNCT_RE.exec(core);
+        if (pm) {
+          const base = pm[1];
+          const punct = pm[2];
+          if (base.length >= 2) {
+            const baseHit = lookupExactOrLower(base);
+            if (baseHit !== undefined && baseHit !== base) {
+              hit = baseHit + punct;
+            }
           }
         }
       }
@@ -743,6 +919,7 @@
     function restoreAll() {
       cancelScheduledFlush();
       clearPendingQueue();
+      resetConflictExemption();
       const prevApplying = isApplying;
       isApplying = true;
       try {
@@ -792,6 +969,7 @@
 
     function processTextNode(node) {
       if (!node || node.nodeType !== 3 || node.isConnected === false) return;
+      if (exemptNodes.has(node)) return;
       const cur = node.nodeValue;
       if (typeof cur !== 'string' || !cur) return;
 
@@ -811,6 +989,21 @@
           }
           const nextFromNew = translateIfMatched(cur);
           if (nextFromNew !== null) {
+            const ts = nowMs();
+            let tracker = nodeConflictTrack.get(node);
+            if (!tracker || ts - tracker.windowStart > CONFLICT_WINDOW_MS) {
+              tracker = { count: 1, windowStart: ts };
+            } else {
+              tracker.count += 1;
+            }
+            nodeConflictTrack.set(node, tracker);
+            if (tracker.count >= CONFLICT_REWRITE_THRESHOLD) {
+              exemptNodes.add(node);
+              exemptCount += 1;
+              nodeConflictTrack.delete(node);
+              untrackTextNode(node);
+              return;
+            }
             node.nodeValue = nextFromNew;
             trackTextNode(node, cur, nextFromNew);
           } else {
@@ -901,18 +1094,20 @@
       } catch {}
     }
 
-    function walkSubtree(node, ancestorChecked = false, budget = null) {
+    function walkSubtree(node, ancestorChecked = false, budget = null, skipText = false) {
       if (!node) return;
       if (budget) {
-        if (budget.remaining <= 0) {
+        if (isBudgetExhausted(budget)) {
           budget.overflow.push(node);
           return;
         }
         budget.remaining -= 1;
+        budget.processed += 1;
       }
       const nt = node.nodeType;
 
       if (nt === 3) {
+        if (skipText) return;
         if (ancestorChecked || !hasSkippedAncestor(node, true)) {
           processTextNode(node);
         }
@@ -922,18 +1117,23 @@
       if (nt === 1) {
         if (isHardSkipAllElement(node)) return;
 
-        processElementAttributes(node);
+        const isTextSkipSelf = isTextOnlySkipElement(node);
+        if (!isTextSkipSelf) {
+          processElementAttributes(node);
+        }
 
         if (isEditableContentSkipElement(node)) return;
 
+        const childSkipText = skipText || isTextSkipSelf;
+
         if (node.shadowRoot && !isShadowHostSkipped(node)) {
           attachRootObserver(node.shadowRoot);
-          walkSubtree(node.shadowRoot, true, budget);
+          walkSubtree(node.shadowRoot, true, budget, childSkipText);
         }
 
         const children = getChildList(node);
         for (let i = 0; i < children.length; i++) {
-          walkSubtree(children[i], true, budget);
+          walkSubtree(children[i], true, budget, childSkipText);
         }
         return;
       }
@@ -942,7 +1142,7 @@
         if (node.host && isShadowHostSkipped(node.host)) return;
         const children = getChildList(node);
         for (let i = 0; i < children.length; i++) {
-          walkSubtree(children[i], true, budget);
+          walkSubtree(children[i], true, budget, skipText);
         }
       }
     }
@@ -998,8 +1198,10 @@
       const prevApplying = isApplying;
       isApplying = true;
       try {
-        if (target.nodeType === 1 && hasSkippedAncestor(target, true)) {
-          // Target is already inside a skipped container
+        if (target.nodeType === 1) {
+          if (!hasSkippedAncestor(target, false) && !hasEditableAncestor(target)) {
+            walkSubtree(target, false, null, hasTextOnlySkipAncestor(target));
+          }
         } else if (target.nodeType === 3) {
           if (!hasSkippedAncestor(target, true)) processTextNode(target);
         } else {
@@ -1022,12 +1224,14 @@
       const target = rootNode || doc?.body || doc?.documentElement;
       if (!target) return false;
 
-      const budget = { remaining: MAX_NODES_PER_FLUSH, overflow: [] };
+      const budget = createSliceBudget();
       const prevApplying = isApplying;
       isApplying = true;
       try {
-        if (target.nodeType === 1 && hasSkippedAncestor(target, true)) {
-          // Target is already inside a skipped container
+        if (target.nodeType === 1) {
+          if (!hasSkippedAncestor(target, false) && !hasEditableAncestor(target)) {
+            walkSubtree(target, false, budget, hasTextOnlySkipAncestor(target));
+          }
         } else if (target.nodeType === 3) {
           if (!hasSkippedAncestor(target, true)) processTextNode(target);
         } else {
@@ -1098,7 +1302,7 @@
         clearPendingQueue();
         const rootEl = doc?.body || doc?.documentElement || doc;
         if (rootEl) {
-          const budget = { remaining: MAX_NODES_PER_FLUSH, overflow: [] };
+          const budget = createSliceBudget();
           const prevApplying = isApplying;
           isApplying = true;
           try {
@@ -1120,11 +1324,11 @@
 
       if (!hasPendingNodes()) return;
 
-      const budget = { remaining: MAX_NODES_PER_FLUSH, overflow: [] };
+      const budget = createSliceBudget();
       const prevApplying = isApplying;
       isApplying = true;
       try {
-        while (pendingCursor < pendingQueue.length && budget.remaining > 0) {
+        while (pendingCursor < pendingQueue.length && !isBudgetExhausted(budget)) {
           const n = pendingQueue[pendingCursor];
           pendingQueue[pendingCursor] = null;
           pendingCursor += 1;
@@ -1134,11 +1338,12 @@
           if (n.nodeType === 3) {
             if (!hasSkippedAncestor(n, true)) {
               budget.remaining -= 1;
+              budget.processed += 1;
               processTextNode(n);
             }
           } else if (n.nodeType === 1) {
-            if (!hasSkippedAncestor(n, true)) {
-              walkSubtree(n, true, budget);
+            if (!hasSkippedAncestor(n, false) && !hasEditableAncestor(n)) {
+              walkSubtree(n, true, budget, hasTextOnlySkipAncestor(n));
             }
           } else {
             walkSubtree(n, true, budget);
@@ -1196,13 +1401,13 @@
           if (hasSkippedAncestor(rec.target, true)) continue;
           if (enqueuePendingNode(rec.target)) queued = true;
         } else if (rec.type === 'attributes' && rec.target) {
-          if (hasSkippedAncestor(rec.target, true)) continue;
+          if (hasSkippedAncestor(rec.target, false) || hasEditableAncestor(rec.target)) continue;
           if (enqueuePendingNode(rec.target)) queued = true;
         } else if (rec.type === 'childList') {
           if (shadowObservers.length > 0 && rec.removedNodes && rec.removedNodes.length > 0) {
             pruneDetachedShadowObservers();
           }
-          if (rec.target && hasSkippedAncestor(rec.target, true)) continue;
+          if (rec.target && (hasSkippedAncestor(rec.target, false) || hasEditableAncestor(rec.target))) continue;
           const added = rec.addedNodes;
           if (added && added.length) {
             for (let j = 0; j < added.length; j++) {
@@ -1357,6 +1562,7 @@
       if (destroyed) return currentLocale;
       cancelScheduledFlush();
       clearPendingQueue();
+      resetConflictExemption();
       const resolved = resolveLocaleConfig(nextLocale);
       configuredLocale = resolved.configured;
       currentLocale = resolved.resolved;
@@ -1523,6 +1729,7 @@
         trackedAttrCount: countLiveTracked(trackedAttrRefs, attrRecords),
         trackedTextRefCount: trackedTextRefs.size,
         trackedAttrRefCount: trackedAttrRefs.size,
+        exemptNodeCount: exemptCount,
         sweepCount,
         collectMissing,
         missingCount: missingSet.size,
@@ -1539,6 +1746,7 @@
       destroyed = true;
       stopObservers();
       restoreAll();
+      resetConflictExemption();
       lookupCache.clear();
       exactMap.clear();
       lowerMap.clear();
@@ -1593,7 +1801,9 @@
 
   return {
     HARD_SKIP_SELECTORS,
+    CHAT_PROSE_SELECTORS,
     ATTR_WHITELIST,
+    looksLikeStepPathOrCmd,
     applyPatternTemplate,
     createHostI18nController,
   };

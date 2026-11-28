@@ -6,7 +6,7 @@
 
 Live **10-language native UI translation** (~5,400 entries per locale), unified **6-Tab Control Hub & Global Drawer (`Ctrl/Cmd+Alt+,`)**, **segmented status capsule HUD**, **Prompt Library & Command Palette (`Ctrl/Cmd+Alt+P`)**, configurable auto `/compact` guard with viewport scroll shield, streaming **Prompt Queue**, crash-proof **Draft Vault**, turn bookmarks & cross-session archive, **policy-gated Auto-Accept** with a non-bypassable hard deny blacklist, zero-`:has()` **Optical Theme Studio**, read-only **Quota Pulse**, and offline **Storage Doctor** — **pick only the modules you want**.
 
-> **Version:** `v1.4.1` · **License:** [MIT](./LICENSE) · **Runtime:** Node.js >= 22 · **Dependencies:** Zero runtime npm deps · **Architecture:** Zero-ASAR CDP (Lossless) · **Companion:** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
+> **Version:** `v1.5.0` · **License:** [MIT](./LICENSE) · **Runtime:** Node.js >= 22 · **Dependencies:** Zero runtime npm deps · **Architecture:** Zero-ASAR CDP (Lossless) · **Companion:** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
 > **Non-Affiliation Disclaimer:** `agy-Sag` is an independent open-source community project and is not affiliated with, sponsored by, or endorsed by Google LLC. References to "Antigravity" and "Google" are used solely to describe software compatibility.
 
@@ -58,8 +58,8 @@ Every module in **`agy-Sag`** is independently toggleable from the `Overview` ta
 
 | Layer | Module | Default | Risk / Isolation | What It Does |
 | :---: | :--- | :---: | :--- | :--- |
-| **L1** | **Native UI Translation** (`hostI18n`) | **ON** | 100% Offline · Lossless | Real-time multi-language localization for Antigravity 2.36+ UI across **10 languages** (`zh-CN`, `zh-TW`, `ja`, `ko`, `es`, `fr`, `de`, `ru`, `pt-BR`, `en`). ~5,407–5,523 entries per target locale (497 core + layered extended packs + 424 regex patterns), physical skip isolation for code / inputs / chat bubbles / KaTeX & MathJax inline LaTeX / slash command names, time-sliced large-DOM flushing with generation tokens, Shadow DOM recursion, instant hot-switch, and custom JSON pack import. |
-| **L1** | **Thought & Title Translation** (`thoughtTranslate`) | OFF | **Strict Opt-in** · Sidecar Proxy | Real-time translation for agent thinking blocks and optional sidebar/breadcrumb titles. Supports **5 engines**: keyless Machine Translation (or custom endpoint), BYO API Key **OpenAI-compatible** (OpenAI / DeepSeek / OpenRouter / Groq / LM Studio), **Anthropic**, **Gemini**, and offline local **Ollama**. Runs strictly via zero-port Node Sidecar proxy with `0600` isolated secrets (excluded from exports/backups), SSRF/redirect guards, LRU caching, bilingual / translated-only toggle, and Prism auto-yield. |
+| **L1** | **Native UI Translation** (`hostI18n`) | **ON** | 100% Offline · Lossless | Real-time multi-language localization for Antigravity 2.36+ UI across **10 languages** (`zh-CN`, `zh-TW`, `ja`, `ko`, `es`, `fr`, `de`, `ru`, `pt-BR`, `en`). ~5,464–5,580 entries per target locale (534 core + layered extended packs + 444 regex patterns covering composite steps & Swarm labels), 6 whitelisted attributes, shortcut/punctuation assembly, 5ms + 600-node dual slicing, per-node React write-conflict fuse, physical skip isolation (code / CLI cmds / chat bubbles / KaTeX & MathJax / slash commands), Shadow DOM recursion, and custom JSON pack import. |
+| **L1** | **Thought & Title Translation** (`thoughtTranslate`) | OFF | **Strict Opt-in** · Sidecar Proxy | Real-time translation for agent thinking blocks and optional sidebar/breadcrumb titles. Supports **5 engines**: keyless dual-route MT (Google GTX + Bing failover with backtick/path protection), BYO API Key **OpenAI-compatible multi-profile** (OpenAI / Gemini / DeepSeek / OpenRouter / Groq / LM Studio), **Anthropic**, **Gemini**, and offline local **Ollama**. Features `0600` disk-persisted cache (600 entries), macOS/env system proxy HTTP CONNECT tunneling, 9-language technical manuscript prompts (`technical`/`concise`), reasoning-model no-thinking guard, 48k chunking, zero-port SSE streaming, 20-title batch translation, target-language skip, and Prism auto-yield. |
 | **L1** | **Theme & Aesthetics** (`themeStudio`) | OFF | 100% Offline | Zero-`:has()` full-surface optical theme & motion engine: **15 dark/light/stylized skins**, **8 one-click visual looks**, automatic dark/light host pairing, right-side **Auxiliary Pane** (Subagents / Background Tasks / Files Changed / Terminals) surface styling, 7 accent overrides, 4 surface materials (Clean / Smoked Facets / Paper & Ink / Aurora Glass), 4 corner styles, 6 monospace stacks (incl. Sarasa SC) + ligatures, CJK tuning, `CSS.highlights` 5-step velvet stream fade, FastDOM smooth typing caret, 0fps semantic horizon glow (Browser-Hole safe), sanitized custom CSS, and `plugin://` extension iframe sync. |
 | **L1** | **Reading Navigation** (`readingNav`) | OFF | 100% Offline | Streaming-safe auto-folding for long code blocks (`>= 40` lines default, configurable `20/40/60/80`, covering chat, `artifact-view`, `auxiliary-pane` & `terminal-panel`) with `scrollTop` fold compensation, sticky line-count/expand/wrap/copy bar, `Alt+↑/↓` turn navigation, uncapped rail with smooth scroll-to-bottom (`⤓`), `Alt+F` searchable outline & 1-click fold-all code/steps, and zero-`innerHTML` Mermaid zoom + SVG export modal (auto-yields to Prism outline nav). |
 | **L2** | **Auto-Compact Guard** (`compactGuard`) | **ON** | 100% Offline | Configurable compaction threshold (`off` or `50%–98%`, default `80%`), silent auto-compact with viewport scroll shield, Lexical two-step slash menu support, `/clear` clean-slate restart, and post-compact anchor recovery. |
@@ -135,6 +135,12 @@ node cli/sag-cli.mjs launch --dry-run --json
 node cli/sag-cli.mjs launch --port=9222
 node cli/sag-cli.mjs keepalive --preset=power --lang=zh-CN
 
+# Preview or apply smooth migration from Obsidian Prism (read-only redacted preview by default; Prism files untouched)
+node cli/sag-cli.mjs migrate-from-prism --dry-run
+
+# Print macOS LaunchAgent plist template for zero-touch CDP keepalive
+node cli/sag-cli.mjs launch --print-launchagent
+
 # Attach once with optional preset & display language (pass --port=9222 if launched with a fixed port)
 node cli/sag-cli.mjs attach --preset=power --lang=zh-CN
 
@@ -207,7 +213,7 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (255/255 passing, zero external deps)
+npm test                 # Run full native node:test suite (262/262 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
 npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (22 markers)
 npm run doctor           # Read-only local environment diagnostics

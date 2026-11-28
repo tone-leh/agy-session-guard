@@ -58,6 +58,15 @@
     return `${m}:${s}`;
   }
 
+  function formatDataSourceLabel(source) {
+    const key = String(source || '').trim().toLowerCase();
+    if (key === 'host-bridge' || key === 'bridge-estimate' || key === 'pulse-dom') return 'Prism RPC';
+    if (key === 'nov-xray') return 'NOV X-Ray';
+    if (key === 'local-disk') return 'Local Disk';
+    if (key === 'dom-est' || key === 'dom-estimate') return 'DOM Est';
+    return null;
+  }
+
   function computeQuotaPct(quota) {
     if (!quota) return 0;
     const obsPct = quota.observed?.observedPct;
@@ -237,98 +246,21 @@
   }
 
   // Scoped Shadow DOM styles that inherit Obsidian Prism's exact light/dark variables (--f, --mu, --d, --ct, --sl, --ac)
-  const PRISM_SHADOW_CSS = `
-#context-card[data-ag-pulse-vial-mode="vial"] .ag-sg-pv-sec{grid-column:2;}
-.ag-sg-pv-sec{
-  margin-top:8px;
-  padding-top:8px;
-  border-top:1px solid var(--d,rgba(148,163,184,.18));
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-}
-.ag-sg-pv-head{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:8px;
-}
-.ag-sg-pv-title-wrap{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  min-width:0;
-}
-.ag-sg-pv-title{
-  font-size:11px;
-  font-weight:600;
-  color:var(--f,#eef1f7);
-  white-space:nowrap;
-}
-.ag-sg-pv-bm{
-  appearance:none;
-  border:0;
-  padding:0 5px;
-  height:18px;
-  border-radius:999px;
-  background:rgba(245,158,11,.14);
-  color:#d97706;
-  font:600 10px/18px inherit;
-  cursor:pointer;
-  white-space:nowrap;
-}
-.ag-sg-pv-bm:hover{filter:brightness(1.08);}
-.ag-sg-pv-act{
-  appearance:none;
-  height:20px;
-  padding:0 8px;
-  border-radius:999px;
-  border:1px solid var(--b,rgba(148,163,184,.26));
-  background:var(--ct,rgba(148,163,184,.12));
-  color:var(--ch,var(--f,#eef1f7));
-  font:500 10.5px/18px inherit;
-  cursor:pointer;
-  white-space:nowrap;
-  transition:background 130ms ease,color 130ms ease,border-color 130ms ease;
-}
-.ag-sg-pv-act:hover{
-  background:var(--hv,rgba(148,163,184,.22));
-  color:var(--f,#eef1f7);
-  border-color:var(--ac,#3186ff);
-}
-.ag-sg-pv-hud{
-  display:flex;
-  flex-wrap:wrap;
-  gap:4px;
-}
-.ag-sg-pv-chip{
-  display:inline-flex;
-  align-items:center;
-  height:18px;
-  padding:0 6px;
-  border-radius:999px;
-  background:var(--ct,rgba(148,163,184,.14));
-  color:var(--mu,#94a3b8);
-  font:500 10.5px/18px inherit;
-  font-variant-numeric:tabular-nums;
-  white-space:nowrap;
-}
-.ag-sg-pv-chip[data-tone="warn"]{color:#d97706;}
-.ag-sg-pv-chip[data-tone="danger"]{color:#ef4444;}
-.ag-sg-pv-chip[data-tone="ok"]{color:#10b981;}
-.ag-sg-pv-chip[data-tone="accent"]{color:var(--ac,#3186ff);}
-.ag-sg-pv-link{
-  appearance:none;
-  border:0;
-  padding:0;
-  background:transparent;
-  color:var(--ac,#3186ff);
-  font:500 10.5px/1.3 inherit;
-  align-self:flex-end;
-  cursor:pointer;
-}
-.ag-sg-pv-link:hover{text-decoration:underline;}
-`.trim();
+  const PRISM_SHADOW_CSS =
+    '#context-card[data-ag-pulse-vial-mode="vial"] .ag-sg-pv-sec{grid-column:2;}' +
+    '.ag-sg-pv-sec{margin-top:8px;padding-top:8px;border-top:1px solid var(--d,rgba(148,163,184,.18));display:flex;flex-direction:column;gap:6px;}' +
+    '.ag-sg-pv-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}' +
+    '.ag-sg-pv-title-wrap{display:inline-flex;align-items:center;gap:6px;min-width:0;}' +
+    '.ag-sg-pv-title{font-size:11px;font-weight:600;color:var(--f,#eef1f7);white-space:nowrap;}' +
+    '.ag-sg-pv-bm{appearance:none;border:0;padding:0 5px;height:18px;border-radius:999px;background:rgba(245,158,11,.14);color:#d97706;font:600 10px/18px inherit;cursor:pointer;white-space:nowrap;}' +
+    '.ag-sg-pv-bm:hover{filter:brightness(1.08);}' +
+    '.ag-sg-pv-act{appearance:none;height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--b,rgba(148,163,184,.26));background:var(--ct,rgba(148,163,184,.12));color:var(--ch,var(--f,#eef1f7));font:500 10.5px/18px inherit;cursor:pointer;white-space:nowrap;transition:background 130ms ease,color 130ms ease,border-color 130ms ease;}' +
+    '.ag-sg-pv-act:hover{background:var(--hv,rgba(148,163,184,.22));color:var(--f,#eef1f7);border-color:var(--ac,#3186ff);}' +
+    '.ag-sg-pv-hud{display:flex;flex-wrap:wrap;gap:4px;}' +
+    '.ag-sg-pv-chip{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:999px;background:var(--ct,rgba(148,163,184,.14));color:var(--mu,#94a3b8);font:500 10.5px/18px inherit;font-variant-numeric:tabular-nums;white-space:nowrap;}' +
+    '.ag-sg-pv-chip[data-tone="warn"]{color:#d97706;}.ag-sg-pv-chip[data-tone="danger"]{color:#ef4444;}.ag-sg-pv-chip[data-tone="ok"]{color:#10b981;}.ag-sg-pv-chip[data-tone="accent"]{color:var(--ac,#3186ff);}' +
+    '.ag-sg-pv-link{appearance:none;border:0;padding:0;background:transparent;color:var(--ac,#3186ff);font:500 10.5px/1.3 inherit;align-self:flex-end;cursor:pointer;}' +
+    '.ag-sg-pv-link:hover{text-decoration:underline;}';
 
   function createStatusPillController(options = {}) {
     const win = options.win || globalRoot;
@@ -367,6 +299,19 @@
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
     const getScope = () => (ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc, activePaneEl) : doc);
+    const mk = (tag, cls, txt, attrs) => {
+      const e = doc.createElement(tag);
+      if (cls) e.className = cls;
+      if (txt !== undefined) e.textContent = txt;
+      if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      return e;
+    };
+    const mkBtn = (cls, txt, attrs, fn) => {
+      const b = mk('button', cls, txt, attrs);
+      b.type = 'button';
+      if (fn) b.addEventListener('click', (ev) => { ev?.preventDefault?.(); ev?.stopPropagation?.(); fn(ev); });
+      return b;
+    };
 
     function ensureStyle() {
       if (!doc || !styles) return;
@@ -500,79 +445,33 @@
 
         while (sec.firstChild) sec.removeChild(sec.firstChild);
 
-        const head = doc.createElement('div');
-        head.className = 'ag-sg-pv-head';
-
-        const titleWrap = doc.createElement('div');
-        titleWrap.className = 'ag-sg-pv-title-wrap';
-        const title = doc.createElement('span');
-        title.className = 'ag-sg-pv-title';
-        title.textContent = `${strings.pvAutoCompactTitle} ${thText}`;
+        const head = mk('div', 'ag-sg-pv-head');
+        const titleWrap = mk('div', 'ag-sg-pv-title-wrap');
+        const title = mk('span', 'ag-sg-pv-title', `${strings.pvAutoCompactTitle} ${thText}`);
         title.title = strings.setDescThreshold;
         titleWrap.appendChild(title);
-
         if (bmCount > 0 && typeof options.onOpenVault === 'function') {
-          const bmBtn = doc.createElement('button');
-          bmBtn.type = 'button';
-          bmBtn.className = 'ag-sg-pv-bm';
-          bmBtn.setAttribute('data-ag-sg-pv-act', 'open-vault');
-          bmBtn.textContent = `★ ${bmCount}`;
-          bmBtn.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            closePrismContextCard(sr);
-            options.onOpenVault();
-          });
-          titleWrap.appendChild(bmBtn);
+          titleWrap.appendChild(mkBtn('ag-sg-pv-bm', `★ ${bmCount}`, { 'data-ag-sg-pv-act': 'open-vault' }, () => { closePrismContextCard(sr); options.onOpenVault(); }));
         }
         head.appendChild(titleWrap);
-
         if (typeof options.onCleanRestart === 'function') {
-          const cleanBtn = doc.createElement('button');
-          cleanBtn.type = 'button';
-          cleanBtn.className = 'ag-sg-pv-act';
-          cleanBtn.setAttribute('data-ag-sg-pv-act', 'clean-restart');
-          cleanBtn.textContent = strings.btnClearKeep;
-          cleanBtn.title = strings.clearKeepTip;
-          cleanBtn.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            closePrismContextCard(sr);
-            options.onCleanRestart({ mode: 'keep' });
-          });
-          head.appendChild(cleanBtn);
+          const cb = mkBtn('ag-sg-pv-act', strings.btnClearKeep, { 'data-ag-sg-pv-act': 'clean-restart' }, () => { closePrismContextCard(sr); options.onCleanRestart({ mode: 'keep' }); });
+          cb.title = strings.clearKeepTip;
+          head.appendChild(cb);
         }
         sec.appendChild(head);
 
-        const hudRow = doc.createElement('div');
-        hudRow.className = 'ag-sg-pv-hud';
-        if (chipSegs.length === 0) {
-          hudRow.hidden = true;
-        } else {
+        const hudRow = mk('div', 'ag-sg-pv-hud');
+        if (chipSegs.length === 0) hudRow.hidden = true;
+        else {
           for (const seg of chipSegs) {
-            const chip = doc.createElement('span');
-            chip.className = 'ag-sg-pv-chip';
-            chip.setAttribute('data-ag-sag-hud-seg', seg.id);
-            chip.setAttribute('data-tone', seg.tone);
+            const chip = mk('span', 'ag-sg-pv-chip', seg.text, { 'data-ag-sag-hud-seg': seg.id, 'data-tone': seg.tone });
             if (seg.title) chip.title = seg.title;
-            chip.textContent = seg.text;
             hudRow.appendChild(chip);
           }
         }
         sec.appendChild(hudRow);
-
-        const settingsBtn = doc.createElement('button');
-        settingsBtn.type = 'button';
-        settingsBtn.className = 'ag-sg-pv-link';
-        settingsBtn.setAttribute('data-ag-sg-pv-act', 'open-settings');
-        settingsBtn.textContent = strings.cardOpenSettingsBtn || 'Full Settings →';
-        settingsBtn.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          closePrismContextCard(sr);
-          options.onOpenSettings?.('conversation');
-        });
-        sec.appendChild(settingsBtn);
+        sec.appendChild(mkBtn('ag-sg-pv-link', strings.cardOpenSettingsBtn || 'Full Settings →', { 'data-ag-sg-pv-act': 'open-settings' }, () => { closePrismContextCard(sr); options.onOpenSettings?.('conversation'); }));
 
         embeddedShadowHosts.add(host);
         embeddedCount += 1;
@@ -582,17 +481,9 @@
     }
 
     function appendMetric(grid, label, value, testAttr) {
-      const cell = doc.createElement('div');
-      cell.className = 'ag-sg-card-metric';
-      if (testAttr) cell.setAttribute('data-ag-sag-card-metric', testAttr);
-      const k = doc.createElement('span');
-      k.className = 'ag-sg-card-mk';
-      k.textContent = label;
-      const v = doc.createElement('span');
-      v.className = 'ag-sg-card-mv';
-      v.textContent = value;
-      cell.appendChild(k);
-      cell.appendChild(v);
+      const cell = mk('div', 'ag-sg-card-metric', undefined, testAttr ? { 'data-ag-sag-card-metric': testAttr } : null);
+      cell.appendChild(mk('span', 'ag-sg-card-mk', label));
+      cell.appendChild(mk('span', 'ag-sg-card-mv', value));
       grid.appendChild(cell);
     }
 
@@ -619,15 +510,30 @@
       const titleEl = doc.createElement('span');
       titleEl.className = 'ag-sg-card-title';
       titleEl.textContent = strings.brand;
-      const metaEl = doc.createElement('span');
-      metaEl.className = 'ag-sg-card-meta';
+      const metaWrap = doc.createElement('span');
+      metaWrap.className = 'ag-sg-card-meta';
       const lastElapsed = Number(lastState.watchdog?.lastTurnElapsedSec);
-      metaEl.textContent =
+      const pctLabel =
         mods.sessionWatchdog && Number.isFinite(lastElapsed) && lastElapsed > 0
           ? `${pct} · ⏱ ${lastElapsed >= 60 ? formatDurationMMSS(lastElapsed) : `${lastElapsed}s`}`
           : pct;
+      const srcTag = formatDataSourceLabel(snap?.source || snap?.telemetry?.dataSource);
+      if (srcTag) {
+        const pctSpan = doc.createElement('span');
+        pctSpan.textContent = `${pctLabel} `;
+        const srcBadge = doc.createElement('span');
+        srcBadge.className = 'ag-sag-card-source';
+        srcBadge.setAttribute('data-testid', 'ag-sag-card-source');
+        srcBadge.setAttribute('data-source', String(snap?.source || snap?.telemetry?.dataSource || ''));
+        srcBadge.textContent = srcTag;
+        if (srcBadge.style) Object.assign(srcBadge.style, { marginLeft: '4px', padding: '1px 5px', borderRadius: '999px', fontSize: '10px', border: '1px solid var(--border,rgba(148,163,184,0.28))', opacity: '0.88' });
+        metaWrap.appendChild(pctSpan);
+        metaWrap.appendChild(srcBadge);
+      } else {
+        metaWrap.textContent = pctLabel;
+      }
       head.appendChild(titleEl);
-      head.appendChild(metaEl);
+      head.appendChild(metaWrap);
       cardEl.appendChild(head);
 
       const sagStr = typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
@@ -713,67 +619,31 @@
       }
 
       if (mods.outlineBookmarks) {
-        const bmCell = doc.createElement('div');
-        bmCell.className = 'ag-sg-card-metric';
-        bmCell.setAttribute('data-ag-sag-card-metric', 'bookmarks');
-        const bmK = doc.createElement('span');
-        bmK.className = 'ag-sg-card-mk';
-        bmK.textContent = strings.cardBookmarksLabel;
+        const bmCell = mk('div', 'ag-sg-card-metric', undefined, { 'data-ag-sag-card-metric': 'bookmarks' });
+        bmCell.appendChild(mk('span', 'ag-sg-card-mk', strings.cardBookmarksLabel));
         if (bmCount > 0 && typeof options.onOpenVault === 'function') {
-          const bmLink = doc.createElement('button');
-          bmLink.type = 'button';
-          bmLink.className = 'ag-sg-card-link';
-          bmLink.setAttribute('data-ag-sg-card-act', 'open-vault');
-          bmLink.textContent = `★ ${bmCount}`;
-          bmLink.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            close();
-            options.onOpenVault();
-          });
-          bmCell.appendChild(bmK);
-          bmCell.appendChild(bmLink);
+          bmCell.appendChild(mkBtn('ag-sg-card-link', `★ ${bmCount}`, { 'data-ag-sg-card-act': 'open-vault' }, () => { close(); options.onOpenVault(); }));
         } else {
-          const bmV = doc.createElement('span');
-          bmV.className = 'ag-sg-card-mv';
-          bmV.textContent = String(bmCount);
-          bmCell.appendChild(bmK);
-          bmCell.appendChild(bmV);
+          bmCell.appendChild(mk('span', 'ag-sg-card-mv', String(bmCount)));
         }
         grid.appendChild(bmCell);
       }
 
       if (mods.draftGuard !== false) {
-        appendMetric(
-          grid,
-          strings.cardDraftLabel || 'Draft',
-          lastState.hasDraft ? (strings.cardDraftSaved || 'Saved') : (strings.cardDraftNone || 'None'),
-          'draft'
-        );
+        appendMetric(grid, strings.cardDraftLabel || 'Draft', lastState.hasDraft ? (strings.cardDraftSaved || 'Saved') : (strings.cardDraftNone || 'None'), 'draft');
       }
 
       if (mods.quotaPulse && lastState.quota) {
         const qPct = computeQuotaPct(lastState.quota);
         const turns5h = Number(lastState.quota.localEstimate?.turns5h) || 0;
         const soft5h = Number(lastState.quota.limits?.softTurns5h) || 60;
-        const qCell = doc.createElement('div');
-        qCell.className = 'ag-sg-card-metric';
-        qCell.setAttribute('data-ag-sag-card-metric', 'quota');
-        const qk = doc.createElement('span');
-        qk.className = 'ag-sg-card-mk';
-        qk.textContent = strings.cardQuotaLabel || '5h quota';
-        const qv = doc.createElement('span');
-        qv.className = 'ag-sg-card-mv';
-        qv.textContent = `${qPct}% · ${turns5h}/${soft5h}`;
-        const qTrack = doc.createElement('div');
-        qTrack.className = 'ag-sag-quota-bar';
-        const qFill = doc.createElement('span');
-        qFill.className = 'ag-sag-quota-bar-fill';
-        qFill.setAttribute('data-tone', QUOTA_TONE_MAP[lastState.quota.health] || 'ok');
+        const qCell = mk('div', 'ag-sg-card-metric', undefined, { 'data-ag-sag-card-metric': 'quota' });
+        const qTrack = mk('div', 'ag-sag-quota-bar');
+        const qFill = mk('span', 'ag-sag-quota-bar-fill', undefined, { 'data-tone': QUOTA_TONE_MAP[lastState.quota.health] || 'ok' });
         if (qFill.style) qFill.style.width = `${Math.max(0, Math.min(100, qPct))}%`;
         qTrack.appendChild(qFill);
-        qCell.appendChild(qk);
-        qCell.appendChild(qv);
+        qCell.appendChild(mk('span', 'ag-sg-card-mk', strings.cardQuotaLabel || '5h quota'));
+        qCell.appendChild(mk('span', 'ag-sg-card-mv', `${qPct}% · ${turns5h}/${soft5h}`));
         qCell.appendChild(qTrack);
         grid.appendChild(qCell);
       }
@@ -795,61 +665,33 @@
 
       if (grid.children.length > 0) cardEl.appendChild(grid);
 
-      const foot = doc.createElement('div');
-      foot.className = 'ag-sg-card-foot';
-      const mkAct = (cls, text, act, onClick) => {
-        const b = doc.createElement('button');
-        b.type = 'button';
-        b.className = cls;
-        b.textContent = text;
-        b.setAttribute('data-ag-sg-card-act', act);
-        b.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          onClick();
-        });
-        return b;
+      const tel = snap?.telemetry || lastState.telemetry || null;
+      if (tel && typeof tel === 'object' && [tel.active5hSessions, tel.active5hSteps, tel.active7dSteps].some((n) => Number.isFinite(Number(n)))) {
+        const num = (v) => Math.max(0, Math.round(Number(v) || 0));
+        const telRow = doc.createElement('div');
+        telRow.className = 'ag-sag-telemetry-row';
+        telRow.setAttribute('data-testid', 'ag-sag-telemetry-row');
+        if (telRow.style) Object.assign(telRow.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '5px 10px', fontSize: '11px', borderTop: '1px solid var(--border,rgba(148,163,184,0.18))', color: 'var(--muted-foreground,#94a3b8)', fontVariantNumeric: 'tabular-nums' });
+        const l = doc.createElement('span');
+        l.textContent = `5h ${num(tel.active5hSessions)} sess · ${num(tel.active5hSteps)} steps`;
+        const r = doc.createElement('span');
+        r.textContent = `7d ${num(tel.active7dSteps)} steps`;
+        telRow.appendChild(l);
+        telRow.appendChild(r);
+        cardEl.appendChild(telRow);
+      }
+
+      const foot = mk('div', 'ag-sg-card-foot');
+      const addAct = (cls, text, act, fn, title) => {
+        const b = mkBtn(cls, text, { 'data-ag-sg-card-act': act }, () => { close(); fn(); });
+        if (title) b.title = title;
+        foot.appendChild(b);
       };
-      if (typeof options.onCompactNow === 'function') {
-        foot.appendChild(
-          mkAct('ag-sg-btn', strings.btnCompactNow, 'compact-now', () => {
-            close();
-            options.onCompactNow();
-          })
-        );
-      }
-      if (typeof options.onCleanRestart === 'function') {
-        const cleanBtn = mkAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clean-restart', () => {
-          close();
-          options.onCleanRestart({ mode: 'keep' });
-        });
-        cleanBtn.title = strings.clearKeepTip;
-        foot.appendChild(cleanBtn);
-      }
-      if (mods.precompactExport !== false && typeof options.onExportSession === 'function') {
-        foot.appendChild(
-          mkAct('ag-sg-btn', sagStr.cardExportMdBtn || 'Export MD', 'export-md', () => {
-            close();
-            options.onExportSession();
-          })
-        );
-      }
-      if (typeof options.onOpenShortcuts === 'function') {
-        foot.appendChild(
-          mkAct('ag-sg-btn', '⌨', 'open-shortcuts', () => {
-            close();
-            options.onOpenShortcuts();
-          })
-        );
-      }
-      if (typeof options.onOpenSettings === 'function' && strings.cardOpenSettingsBtn) {
-        foot.appendChild(
-          mkAct('ag-sg-btn', strings.cardOpenSettingsBtn, 'open-settings', () => {
-            close();
-            options.onOpenSettings('overview');
-          })
-        );
-      }
+      if (typeof options.onCompactNow === 'function') addAct('ag-sg-btn', strings.btnCompactNow, 'compact-now', options.onCompactNow);
+      if (typeof options.onCleanRestart === 'function') addAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clean-restart', () => options.onCleanRestart({ mode: 'keep' }), strings.clearKeepTip);
+      if (mods.precompactExport !== false && typeof options.onExportSession === 'function') addAct('ag-sg-btn', sagStr.cardExportMdBtn || 'Export MD', 'export-md', options.onExportSession);
+      if (typeof options.onOpenShortcuts === 'function') addAct('ag-sg-btn', '⌨', 'open-shortcuts', options.onOpenShortcuts);
+      if (typeof options.onOpenSettings === 'function' && strings.cardOpenSettingsBtn) addAct('ag-sg-btn', strings.cardOpenSettingsBtn, 'open-settings', () => options.onOpenSettings('overview'));
       if (foot.children.length > 0) cardEl.appendChild(foot);
     }
 
@@ -860,53 +702,22 @@
       ensureStyle();
 
       if (!wrapEl || wrapEl.parentElement !== footer) {
-        if (wrapEl) {
-          try { wrapEl.remove?.(); } catch {}
-        }
-        wrapEl = coexist.markOwnedNoTranslate(doc.createElement('div'));
-        wrapEl.className = 'ag-sg-pill-wrap';
-        wrapEl.setAttribute('data-testid', 'ag-sg-pill-wrap');
-
-        pillBtn = doc.createElement('button');
-        pillBtn.type = 'button';
-        pillBtn.className = 'ag-sg-status-pill';
-        pillBtn.setAttribute('data-testid', PILL_TESTID);
-        pillBtn.setAttribute('aria-haspopup', 'dialog');
-        pillBtn.setAttribute('aria-expanded', 'false');
-        pillBtn.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          toggle();
-        });
-
-        dotEl = doc.createElement('span');
-        dotEl.className = 'ag-sg-status-dot';
-        dotEl.setAttribute('aria-hidden', 'true');
-
-        segsEl = doc.createElement('span');
-        segsEl.className = 'ag-sag-hud-segs';
-
+        try { wrapEl?.remove?.(); } catch {}
+        wrapEl = coexist.markOwnedNoTranslate(mk('div', 'ag-sg-pill-wrap', undefined, { 'data-testid': 'ag-sg-pill-wrap' }));
+        pillBtn = mkBtn('ag-sg-status-pill', undefined, { 'data-testid': PILL_TESTID, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' }, toggle);
+        dotEl = mk('span', 'ag-sg-status-dot', undefined, { 'aria-hidden': 'true' });
+        segsEl = mk('span', 'ag-sag-hud-segs');
         pillBtn.appendChild(dotEl);
         pillBtn.appendChild(segsEl);
-
-        cardEl = doc.createElement('div');
-        cardEl.className = 'ag-sg-status-card';
-        cardEl.setAttribute('role', 'dialog');
-        cardEl.setAttribute('data-testid', CARD_TESTID);
+        cardEl = mk('div', 'ag-sg-status-card', undefined, { role: 'dialog', 'data-testid': CARD_TESTID });
         cardEl.hidden = true;
-
         wrapEl.appendChild(pillBtn);
         wrapEl.appendChild(cardEl);
-
         const kids = Array.from(footer.children || []);
         const trailing = kids.length > 1 ? kids[kids.length - 1] : null;
-        if (trailing && coexist?.safeInsertBefore) {
-          coexist.safeInsertBefore(footer, wrapEl, trailing);
-        } else if (coexist?.safeAppendChild) {
-          coexist.safeAppendChild(footer, wrapEl);
-        } else {
-          try { footer.appendChild(wrapEl); } catch {}
-        }
+        if (trailing && coexist?.safeInsertBefore) coexist.safeInsertBefore(footer, wrapEl, trailing);
+        else if (coexist?.safeAppendChild) coexist.safeAppendChild(footer, wrapEl);
+        else { try { footer.appendChild(wrapEl); } catch {} }
       }
       return wrapEl;
     }
@@ -969,6 +780,8 @@
           const ring = doc.createElement('span');
           ring.className = 'ag-sag-hud-ring';
           ring.setAttribute('aria-hidden', 'true');
+          ring.setAttribute('data-tone', seg.tone);
+          ring.setAttribute('data-pct', String(seg.pct ?? 0));
           ring.style?.setProperty?.('--ag-sag-hud-p', String(seg.pct ?? 0));
           segEl.appendChild(ring);
         }
@@ -1087,6 +900,7 @@
     CARD_TESTID,
     PRISM_SEC_TESTID,
     PRISM_STYLE_ID,
+    formatDataSourceLabel,
     computeHudSegments,
     createStatusPillController,
   };

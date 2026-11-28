@@ -6,7 +6,7 @@
 
 内置 **10 国语言原生界面实时翻译**（每语种约 5,400 词条）、**统一 6-Tab 控制中心与 `Ctrl/Cmd+Alt+,` 全局设置抽屉**、**分段式状态胶囊 HUD**、**`Ctrl/Cmd+Alt+P` 提示词库与命令面板**、自定义阈值静默 `/compact` 防爆与视口滚动盾、流式运行中 **提示词排队**、防丢 **草稿保护**、轮次书签与跨会话档案库、带不可绕过高危黑名单的 **安全自动审批**、零 `:has()` **光学主题与中文字体排版**、零封号风险的 **只读配额脉冲**，以及离线 **本地存储体检与脱敏备份 CLI**——**全部模块独立开关，按需启用**。
 
-> **当前版本：** `v1.4.1` · **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
+> **当前版本：** `v1.5.0` · **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
 > **非官方社区项目与商标免责声明：** `agy-Sag` 为独立的开源社区项目，与 Google LLC 无任何隶属、赞助或官方背书关系；文中提及的 “Antigravity” 与 “Google” 仅作软件兼容性说明用途。
 
@@ -58,8 +58,8 @@
 
 | 层级 | 模块 | 默认状态 | 隔离与风险分级 | 核心能力 |
 | :---: | :--- | :---: | :--- | :--- |
-| **L1** | **原生界面翻译**（`hostI18n`） | **开启** | 100% 离线 · 无损热切 | 实时翻译 Antigravity 2.36+ 原生桌面界面，内置 **10 国语言**（简中、繁中、日、韩、西、法、德、俄、葡、英文还原）。每语种覆盖约 5,407–5,523 词条（497 核心 + 分层扩展词库 + 424 正则模板），物理豁免代码块/输入框/对话正文/KaTeX 与 MathJax 内联公式/斜杠命令名，支持带代际令牌的超大 DOM 分片调度、穿透 Shadow DOM 与自定义 JSON 词典热导入。 |
-| **L1** | **思考与标题翻译**（`thoughtTranslate`） | 关闭 | **高敏默认关** · Sidecar 代理 | 实时翻译 Agent 思考块与可选侧栏/面包屑标题。支持 **5 类引擎**：免 Key 轻量机器翻译（及自定义端点）、用户自填 API Key **OpenAI 兼容接口**（OpenAI / DeepSeek / OpenRouter / Groq / LM Studio）、**Anthropic**、**Gemini** 与本机离线 **Ollama**。全部请求经零端口 Node Sidecar 代理转发，API Key 独立存放在 `0600` 本地文件（自动排除在配置导出与备份之外），内置 SSRF/重定向防线、LRU 缓存、双语对照/沉浸译文切换与 Prism 礼让。 |
+| **L1** | **原生界面翻译**（`hostI18n`） | **开启** | 100% 离线 · 无损热切 | 实时翻译 Antigravity 2.36+ 原生桌面界面，内置 **10 国语言**（简中、繁中、日、韩、西、法、德、俄、葡、英文还原）。每语种覆盖约 5,464–5,580 词条（534 核心 + 分层扩展词库 + 444 正则模板，覆盖复合步骤行与 Swarm 词条），支持 6 种属性翻译、快捷键/标点后缀拼装、5ms + 600 节点双预算分片、元素级 React 冲突熔断、物理豁免（代码块/CLI 命令/对话正文/KaTeX 与 MathJax 公式/斜杠命令）、穿透 Shadow DOM 与自定义 JSON 词典导入。 |
+| **L1** | **思考与标题翻译**（`thoughtTranslate`） | 关闭 | **高敏默认关** · Sidecar 代理 | 实时翻译 Agent 思考块与可选侧栏/面包屑标题。支持 **5 类引擎**：免 Key 双路容灾机翻（Google GTX + Bing 自动切换与反引号代码保护）、用户自填 API Key **OpenAI 兼容多 Profile**（OpenAI / Gemini / DeepSeek / OpenRouter / Groq / LM Studio）、**Anthropic**、**Gemini** 与本机离线 **Ollama**。内置 `0600` 磁盘持久缓存（600 条重启不重翻）、macOS/环境系统代理 HTTP CONNECT 穿透、9 语种工程手稿 Prompt（`technical`/`concise`）与推理模型降思考、48k 超长分段、零端口 SSE 流式增量渲染、20 条标题批量打包、目标语自动跳过与 Prism 礼让。 |
 | **L1** | **光学主题与美学皮肤**（`themeStudio`） | 关闭 | 100% 离线 | 零 `:has()` 全表面视觉与动效引擎：内置 **15 套精选深浅与风格皮肤**、**8 套一键外观方案**、跟随宿主明暗自动配对、右侧 **Auxiliary Pane**（子代理/后台任务/变更文件/终端面板）视觉融合、7 档强调色覆写、4 档表面材质（含黑曜切面/纸墨手帐/极光玻璃）、4 档全局圆角、6 档代码字体栈（含更纱黑体）与连字、CJK 调优、`CSS.highlights` 五级水墨流式淡入、FastDOM 丝滑输入光标、0fps 底缘语义微光（避让 Browser Hole）、净化自定义 CSS，以及向 `plugin://` 扩展面板（含 `agy-NOV`）同步主题变量。 |
 | **L1** | **阅读导航**（`readingNav`） | 关闭 | 100% 离线 | 流式保护的长代码块折叠（默认 `>= 40` 行，支持 `20/40/60/80`，同时覆盖对话区、`artifact-view`、`auxiliary-pane` 与 `terminal-panel`），收起自动 `scrollTop` 补偿、吸顶行数/展开/换行/复制条、`Alt+↑/↓` 跳轮、无上限可滚动迷你导轨与一键顺滑滚底（`⤓`）、`Alt+F` 本会话大纲实时搜索、一键折展全部代码与步骤，以及零 `innerHTML` Mermaid 缩放与 SVG 导出模态（遇 Prism 自动礼让）。 |
 | **L2** | **自动压缩保护**（`compactGuard`） | **开启** | 100% 离线 | 自定义预警与触发阈值（`关闭` 或 `50%–98%`，默认 `80%`），默认静默自动压缩并启用视口滚动盾（阅读历史消息时不跳屏）；兼容 Lexical 两步斜杠选择、`/clear` 轻量重开与压缩后锚点续接条。 |
@@ -135,6 +135,12 @@ node cli/sag-cli.mjs launch --dry-run --json
 node cli/sag-cli.mjs launch --port=9222
 node cli/sag-cli.mjs keepalive --preset=power --lang=zh-CN
 
+# 只读脱敏预览或应用 Obsidian Prism 配置平滑迁移（默认零写入，绝不改动 Prism 原文件）
+node cli/sag-cli.mjs migrate-from-prism --dry-run
+
+# 输出 macOS LaunchAgent 无感保活 plist 模板（零手写配置）
+node cli/sag-cli.mjs launch --print-launchagent
+
 # 一次性附着，并指定场景预设与目标语言（固定端口启动时可加 --port=9222）
 node cli/sag-cli.mjs attach --preset=power --lang=zh-CN
 
@@ -207,7 +213,7 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（255/255 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（262/262 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
 npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（22 markers）
 npm run doctor           # 只读本机环境与双星共存诊断

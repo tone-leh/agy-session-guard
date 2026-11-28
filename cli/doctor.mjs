@@ -533,6 +533,9 @@ export function formatDoctorHuman(report) {
       lines.push(`  • ${h}`);
     }
   }
+  if (report.prism?.installed?.found) {
+    lines.push('  • 如计划停用 Obsidian Prism 并切换至纯 agy-Sag：请勿删除 Prism 插件目录的 plugin.json（以保留系统冷启动 CDP 监听），并可运行 agy-sag migrate-from-prism --dry-run 预览配置平滑迁移。');
+  }
 
   return lines.join('\n');
 }

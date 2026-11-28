@@ -59,11 +59,13 @@
   const ALLOWED_THEME_CORNERS = Object.freeze(['sharp', 'balanced', 'soft', 'pill']);
   const ALLOWED_THEME_SURFACES = Object.freeze(['clean', 'smoked', 'paper', 'glass']);
   const ALLOWED_THEME_CODE_FONTS = Object.freeze(['default', 'jetbrains', 'cascadia', 'fira', 'sfmono', 'sarasa']);
+  const ALLOWED_THEME_CHAT_FONTS = Object.freeze(['default', 'system', 'pingfang', 'noto', 'serif']);
   const ALLOWED_THEME_AMBIENT_GLOWS = Object.freeze(['off', 'subtle', 'vivid']);
   const ALLOWED_RADAR_AUDIO_MODES = Object.freeze(['off', 'chime', 'tts', 'both']);
   const ALLOWED_THOUGHT_ENGINES = Object.freeze(['mt', 'openai', 'anthropic', 'gemini', 'ollama']);
   const ALLOWED_THOUGHT_TRIGGERS = Object.freeze(['auto', 'manual']);
   const ALLOWED_THOUGHT_VIEWS = Object.freeze(['bilingual', 'translated']);
+  const ALLOWED_THOUGHT_STYLES = Object.freeze(['technical', 'concise']);
   const QUIET_HOURS_RE = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
 
   const MODULE_CATALOG = Object.freeze([
@@ -125,6 +127,7 @@
     thoughtTargetLang: 'auto', // 'auto' | target locale code
     thoughtTrigger: 'auto', // 'auto' | 'manual'
     thoughtViewMode: 'bilingual', // 'bilingual' | 'translated'
+    thoughtStylePreset: 'technical', // 'technical' | 'concise'
     thoughtTranslateTitles: false, // opt-in sidebar/breadcrumb title translation
     autoAcceptPolicy: 'readonly-safe', // 'readonly-safe' | 'dev-flow' | 'custom'
     autoAcceptCustomPatterns: Object.freeze([]), // string[] allow patterns (always subordinate to HARD_DENY_PATTERNS)
@@ -135,6 +138,7 @@
     themeCorners: 'balanced', // 'sharp' | 'balanced' | 'soft' | 'pill'
     themeSurface: 'smoked', // 'clean' | 'smoked' | 'paper' | 'glass'
     themeCodeFont: 'default', // 'default' | 'jetbrains' | 'cascadia' | 'fira' | 'sfmono' | 'sarasa'
+    themeChatFont: 'default', // 'default' | 'system' | 'pingfang' | 'noto' | 'serif'
     themeCodeLigatures: false, // enable programming ligatures (calt/liga)
     themeAmbientGlow: 'subtle', // 'off' | 'subtle' | 'vivid' (0fps CSS semantic horizon glow)
     themeStreamFade: true, // CSS.highlights 5-step velvet stream feathering (zero DOM wrap)
@@ -337,6 +341,10 @@
       ? src.thoughtViewMode
       : fallback.thoughtViewMode || 'bilingual';
 
+    const thoughtStylePreset = ALLOWED_THOUGHT_STYLES.includes(src.thoughtStylePreset)
+      ? src.thoughtStylePreset
+      : fallback.thoughtStylePreset || 'technical';
+
     const thoughtTranslateTitles =
       src.thoughtTranslateTitles !== undefined
         ? Boolean(src.thoughtTranslateTitles)
@@ -380,6 +388,10 @@
     const themeCodeFont = ALLOWED_THEME_CODE_FONTS.includes(src.themeCodeFont)
       ? src.themeCodeFont
       : fallback.themeCodeFont || 'default';
+
+    const themeChatFont = ALLOWED_THEME_CHAT_FONTS.includes(src.themeChatFont)
+      ? src.themeChatFont
+      : fallback.themeChatFont || 'default';
 
     const themeCodeLigatures =
       src.themeCodeLigatures !== undefined
@@ -477,6 +489,7 @@
       thoughtTargetLang,
       thoughtTrigger,
       thoughtViewMode,
+      thoughtStylePreset,
       thoughtTranslateTitles,
       autoAcceptPolicy,
       autoAcceptCustomPatterns,
@@ -487,6 +500,7 @@
       themeCorners,
       themeSurface,
       themeCodeFont,
+      themeChatFont,
       themeCodeLigatures,
       themeAmbientGlow,
       themeStreamFade,
@@ -1178,7 +1192,9 @@
     ALLOWED_THEME_CORNERS,
     ALLOWED_THEME_SURFACES,
     ALLOWED_THEME_CODE_FONTS,
+    ALLOWED_THEME_CHAT_FONTS,
     ALLOWED_THEME_AMBIENT_GLOWS,
+    ALLOWED_THOUGHT_STYLES,
     MODULE_CATALOG,
     MODULE_GROUPS,
     MODULE_META,

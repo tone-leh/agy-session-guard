@@ -1,4 +1,4 @@
-# agy-Sag Project Handoff Baseline (v1.4.1)
+# agy-Sag Project Handoff Baseline (v1.5.0)
 
 > This handoff document summarizes the verified architecture, module boundaries, dual-star synergy contract, and next priorities for dedicated `agy-Sag` agents.
 
@@ -77,6 +77,11 @@
   - Added 20 Antigravity `2.35.2` UI terms across all 9 target locales (484 core entries/locale) plus Auxiliary Pane theme styling and deduplicated long code-block folding.
   - Added read-only symlink-guarded redacted `searchSanitizedSessions()` (`storage search`, `sag:search_sessions`, `BookmarkVault` `★ Bookmarks / 🔍 All Sessions` toggle), `draftGuard` attachment count recovery hint, and lossless `EXACT_ROWS` dictionary packing.
   - *Verification Baseline*: `249/249` tests passing, `i18n:validate` 0 errors (484 core + 9 ext packs), `workbench:smoke` HTTP 200 (22 markers), `ru` sync bundle `1,497,317 B` (`<= 1,540,000 B`), Watch deferred `956,274 B` (`< 960,000 B`), `readmeImages = 0`.
+- **v1.5.0 Systematic Obsidian Prism Parity & Beyond (`cli/translator-service.mjs`, `packages/core/thought-translator.js`, `packages/core/host-i18n-packs.js`, `packages/core/host-i18n.js`, `cli/cdp-attach.mjs`, `packages/core/theme-studio.js`, `packages/core/reading-nav.js`, `packages/core/context-source.js`, `packages/core/status-pill.js`, `cli/storage-doctor.mjs`, `cli/launcher.mjs`, `cli/sag-cli.mjs`, `cli/watch-daemon.mjs`, `cli/bundle.mjs`, `test/v15-prism-parity.test.mjs`)**:
+  - Upgraded Thought & Title Translator with `0600` disk cache (600 entries), macOS/env system proxy HTTP CONNECT tunneling (with body-timeout cleanup, credential masking & trailing-dot SSRF guard), 9-language technical manuscript prompts (`technical`/`concise`), reasoning-model no-thinking guard, 48k chunking, zero-port SSE streaming (`translate:chunk`), 20-title batch translation (strict no-public-MT fallback for private engines), Google+Bing dual-route failover + backtick/path code protection, multi-profile management, and renderer `isAlreadyTargetLang()` target-language skip.
+  - Expanded 10-language UI packs to **534** core terms & **45** core patterns (**444** total patterns, 5,464–5,580 coverage/locale), upgraded `host-i18n.js` to 6 attributes, shortcut/punctuation assembly, CLI/path protection, 5ms+600 dual budget, and per-node React write-conflict fuse, and added strict `isAntigravitySwarmTarget()` whitelist.
+  - Polished non-native ThemeStudio surfaces (titlebar, active sidebar indicator, Artifact, Monaco, xterm, non-sticky glass), added `themeChatFont` and `completed` horizon glow; added 10-turn chapter badges, reversible step folding, and zero-intrusion Omni plain-link/path pill in `readingNav`; added zero-write `readLocalTelemetrySnapshot()` (`nov-xray` → `local-disk` → `dom-est` fallback); added `migrate-from-prism` (read-only redacted preview + safe secret-preserving apply) and `launch --print-launchagent`; upgraded `cli/bundle.mjs` with multi-pass BPE and deep-freeze object packing.
+  - *Verification Baseline*: `262/262` tests passing, `i18n:validate` 10 built-in (534 core) + 9 extended packs (0 errors), `workbench:smoke` HTTP 200 (22 markers), `doctor` manifest compliant (`v1.5.0`), independent `auditor` review completed with all 11 findings fixed, `readmeImages = 0`.
 - **v1.4.1 Anti-White-Screen / Anti-Freeze, Antigravity `v2.36.0` Dual-Pass Hardening & 10-Language Full Sync (`docs/AUDIT-V236-RESILIENCE.md`, `packages/core/*`, `cli/*`, `test/v236-resilience-hardening.test.mjs`)**:
   - Completed two full resilience audit & remediation passes covering React DOM zero-intrusion (safe DOM helpers, Lexical no-`textContent` guard, body-fixed Smooth Caret, pure-CSS hiding for thought/radar/outline), shared `DomMutationBus` + `HtmlAttrBus` consolidation (merging 11 observers into 2 per-document singletons with hibernation gating & wake-up replay), 3,000-step large conversation budgets, Antigravity `v2.36.0` dual-composer isolation & `Option+Cmd+/` yield, 10-language `Send Now` circuit-breaker parity + 497 core i18n entries across 9 target locales + `zh-TW` queue strings + localized shortcut labels, `storage-doctor` fail-closed truncation orphan protection + live WAL backup + chunked `copyFileSafeAtomic` with `maxBytes`/`O_NOFOLLOW`, `TranslatorService` strict concurrency handoff & `fe80::/10` SSRF guard, and `cli/bundle.mjs` isolated VM lossless packing.
   - *Verification Baseline*: `255/255` tests passing, `i18n:validate` 10 built-in (497 core) + 9 extended packs (0 errors), `workbench:smoke` HTTP 200 (22 markers), `doctor` manifest compliant (`v1.4.1`, `Obsidian Prism v1.0.8-beta.5` detected), `readmeImages = 0`.
@@ -117,8 +122,8 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 255/255 tests passing (node --test)
-npm run i18n:validate                     # 10 built-in (497 core) + 9 extended packs, 0 errors
+npm test                                  # 262/262 tests passing (node --test)
+npm run i18n:validate                     # 10 built-in (534 core) + 9 extended packs, 0 errors
 npm run workbench:smoke                   # HTTP 200, 22 markers verified
 npm run doctor                            # Marketplace manifest + environment diagnostics
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check

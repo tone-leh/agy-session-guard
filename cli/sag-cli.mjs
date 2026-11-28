@@ -41,7 +41,13 @@ import {
   parseStorageArgs,
   searchSanitizedSessions,
 } from './storage-doctor.mjs';
-import { runKeepaliveCli, runLaunchCli } from './launcher.mjs';
+import {
+  applyPrismMigration,
+  buildLaunchAgentPlist,
+  inspectPrismMigration,
+  runKeepaliveCli,
+  runLaunchCli,
+} from './launcher.mjs';
 import { isCliEntry } from './platform-utils.mjs';
 import { startWatchDaemonCli } from './watch-daemon.mjs';
 
@@ -87,8 +93,9 @@ export function formatHelpText() {
     '  status [...]                 Inspect mounted agy-Sag state on Antigravity CDP windows',
     '  remove [...]                 Losslessly detach & clean agy-Sag from Antigravity CDP windows',
     '  watch [...]                  Start Zero-ASAR auto-attach watch daemon (--preset=, --lang=, --once)',
-    '  launch [...]                 Zero-intrusive CDP launch helper (--port=, --dry-run, --auto-relaunch-cold-start)',
+    '  launch [...]                 Zero-intrusive CDP launch helper (--port=, --dry-run, --print-launchagent)',
     '  keepalive [...]              CDP keepalive + SagWatchDaemon supervisor (--port=, --interval=, --once)',
+    '  migrate-from-prism [...]     Inspect or migrate Obsidian Prism settings & thought provider (--dry-run | --apply)',
     '  doctor [...]                 Run environment, Obsidian Prism & agy-NOV dual-star diagnostics',
     '  nov <cmd> [...]              Dual-star agy-NOV control: status | enable | disable | preset | locale',
     '  install [...]                Install native plugin bundle to ~/.gemini/config/plugins/agy-sag',
@@ -594,7 +601,53 @@ export async function runSagCli(argv = process.argv.slice(2), io = {}) {
   }
 
   if (cmd === 'launch') {
+    if (rest.includes('--print-launchagent')) {
+      const plist = buildLaunchAgentPlist({
+        nodePath: process.execPath,
+        cliPath: path.join(REPO_ROOT, 'cli', 'sag-cli.mjs'),
+      });
+      out.stdout(plist);
+      return { ok: true, exitCode: 0, data: { plist } };
+    }
     const data = await runLaunchCli(rest, { out });
+    const ok = data ? data.ok !== false : true;
+    return { ok, exitCode: ok ? 0 : 1, data };
+  }
+
+  if (cmd === 'migrate-from-prism') {
+    const jsonMode = rest.includes('--json');
+    const applyMode = rest.includes('--apply') && !rest.includes('--dry-run');
+    const data = applyMode ? applyPrismMigration({ dryRun: false }) : inspectPrismMigration({});
+    if (jsonMode) {
+      out.stdout(JSON.stringify(data, null, 2));
+    } else {
+      const src = data.sources || {};
+      const lines = [
+        `agy-Sag · Obsidian Prism Migration (${applyMode ? 'APPLIED' : 'DRY-RUN'})`,
+        '============================================================',
+        `Prism config found: ${src.prismConfigFound ? 'yes' : 'no'} | Thought config found: ${src.thoughtConfigFound ? 'yes' : 'no'}`,
+      ];
+      if (data.suggestedConfig) {
+        const sc = data.suggestedConfig;
+        lines.push(
+          `Mapped: locale=${sc.hostI18nLocale || 'auto'} | theme=${sc.themePreset || 'native'} | thought=${sc.modules?.thoughtTranslate ? `${sc.thoughtEngine || 'openai'}/${sc.thoughtViewMode || 'bilingual'}` : 'off'} | style=${sc.thoughtStylePreset || 'technical'} | proxy=${sc.thoughtProxyMode || 'auto'}`
+        );
+      }
+      if (Array.isArray(data.thoughtProfiles) && data.thoughtProfiles.length > 0) {
+        lines.push('Thought profiles (redacted):');
+        for (const p of data.thoughtProfiles) {
+          lines.push(`  • ${p.active ? '[active] ' : ''}${p.name || 'default'} — ${p.model || 'n/a'} @ ${p.baseUrl || 'default'} (key=${p.hasApiKey ? 'stored' : 'none'})`);
+        }
+      }
+      if (Array.isArray(data.recommendations) && data.recommendations.length > 0) {
+        lines.push('Recommendations:');
+        for (const n of data.recommendations) lines.push(`  • ${n}`);
+      }
+      if (!applyMode) {
+        lines.push('Run with --apply to write mapped agy-Sag config & 0600 translator-secrets.json (Prism files are never modified).');
+      }
+      out.stdout(lines.join('\n'));
+    }
     const ok = data ? data.ok !== false : true;
     return { ok, exitCode: ok ? 0 : 1, data };
   }

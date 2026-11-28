@@ -10,9 +10,96 @@
 
   const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const DEFAULT_MAX_TOKENS = 512000;
+  const LOCAL_TELEMETRY_TTL_MS = 30000;
+
+  let localTelemetryCache = null; // { snap, updatedAt }
 
   function isFiniteNum(v) {
     return typeof v === 'number' && Number.isFinite(v);
+  }
+
+  function setLocalTelemetrySnapshot(snap, nowMs = Date.now()) {
+    if (!snap || typeof snap !== 'object') {
+      localTelemetryCache = null;
+      return null;
+    }
+    const cloned = Object.freeze({ ...snap });
+    localTelemetryCache = { snap: cloned, updatedAt: isFiniteNum(nowMs) ? nowMs : Date.now() };
+    return cloned;
+  }
+
+  function getLocalTelemetrySnapshot(nowMs = Date.now()) {
+    if (!localTelemetryCache) return null;
+    const ts = isFiniteNum(nowMs) ? nowMs : Date.now();
+    if (ts - localTelemetryCache.updatedAt > LOCAL_TELEMETRY_TTL_MS) {
+      localTelemetryCache = null;
+      return null;
+    }
+    return localTelemetryCache.snap;
+  }
+
+  function extractTelemetrySummary(snap, fallbackSrc) {
+    if (!snap || typeof snap !== 'object') return null;
+    const a = snap.activity && typeof snap.activity === 'object' ? snap.activity : snap;
+    const g = (v) => (isFiniteNum(v) ? Math.max(0, Math.round(v)) : null);
+    const s5 = g(a.active5hSessions), st5 = g(a.active5hSteps), st7 = g(a.active7dSteps);
+    if (s5 === null && st5 === null && st7 === null && !snap.dataSource) return null;
+    return {
+      active5hSessions: s5 ?? 0,
+      active5hSteps: st5 ?? 0,
+      active7dSteps: st7 ?? 0,
+      dataSource: String(snap.dataSource || fallbackSrc || (snap.novXray ? 'nov-xray' : 'local-disk')),
+    };
+  }
+
+  function resolveFromLocalTelemetry(snap, cascadeId) {
+    if (!snap || typeof snap !== 'object') return null;
+    const normCid = String(cascadeId || '').trim().toLowerCase();
+    const hasGuid = GUID_RE.test(normCid);
+    const norm = (v) => String(v || '').trim().toLowerCase();
+
+    const xray = snap.novXray && typeof snap.novXray === 'object' ? snap.novXray : null;
+    if (xray) {
+      const xc = norm(xray.cascadeId || xray.sessionId || snap.cascadeId);
+      if (!xc || !hasGuid || xc === normCid) {
+        const max = isFiniteNum(xray.maxTokens) && xray.maxTokens > 0 ? xray.maxTokens : DEFAULT_MAX_TOKENS;
+        let frac = isFiniteNum(xray.usedFraction) ? xray.usedFraction : null;
+        let used = isFiniteNum(xray.usedTokens) ? xray.usedTokens : null;
+        if (frac === null && used !== null) frac = used / max;
+        if (used === null && frac !== null) used = Math.round(frac * max);
+        if (frac !== null) {
+          return { source: 'nov-xray', usedFraction: frac, usedTokens: used, maxTokens: max, compactedCount: Number(xray.compactedCount) || 0, compacted: Boolean(xray.compacted) };
+        }
+      }
+    }
+
+    const s = snap.session && typeof snap.session === 'object' ? snap.session : snap;
+    const sc = norm(s.cascadeId || s.sessionId || snap.cascadeId);
+    if (sc ? sc !== normCid : hasGuid) return null;
+
+    const max = isFiniteNum(s.maxTokens) && s.maxTokens > 0 ? s.maxTokens : isFiniteNum(snap.maxTokens) && snap.maxTokens > 0 ? snap.maxTokens : DEFAULT_MAX_TOKENS;
+    let used = isFiniteNum(s.usedTokens) ? s.usedTokens : isFiniteNum(snap.usedTokens) ? snap.usedTokens : null;
+    let frac = isFiniteNum(s.usedFraction) ? s.usedFraction : isFiniteNum(snap.usedFraction) ? snap.usedFraction : null;
+    const stepCount = isFiniteNum(s.stepCount) ? Math.max(0, Math.round(s.stepCount)) : isFiniteNum(snap.stepCount) ? Math.max(0, Math.round(snap.stepCount)) : null;
+    const bytes = isFiniteNum(s.bytes) ? Math.max(0, Math.round(s.bytes)) : isFiniteNum(snap.bytes) ? Math.max(0, Math.round(snap.bytes)) : null;
+
+    if (used === null && frac === null) {
+      if (!((bytes !== null && bytes > 0) || (stepCount !== null && stepCount > 0))) return null;
+      used = Math.max(2000, (bytes > 0 ? Math.round(bytes / 3.6) : 0) + (stepCount > 0 ? stepCount * 420 : 0) + 4000);
+      frac = used / max;
+    } else if (frac === null) frac = used / max;
+    else if (used === null) used = Math.round(frac * max);
+
+    return {
+      source: snap.dataSource === 'nov-xray' ? 'nov-xray' : 'local-disk',
+      usedFraction: frac,
+      usedTokens: used,
+      maxTokens: max,
+      compactedCount: Number(s.compactedCount) || 0,
+      compacted: Boolean(s.compacted),
+      ...(stepCount !== null ? { stepCount } : {}),
+      ...(bytes !== null ? { bytes } : {}),
+    };
   }
 
   function formatTokens(n) {
@@ -302,7 +389,7 @@
     const maxTokens = DEFAULT_MAX_TOKENS;
     const usedTokens = Math.max(2000, Math.round(chars / 3.2) + 6000);
     return {
-      source: 'dom-estimate',
+      source: 'dom-est',
       usedFraction: usedTokens / maxTokens,
       usedTokens,
       maxTokens,
@@ -489,6 +576,12 @@
     const cascadeId = detectCascadeId(doc, win, scopeEl);
     const streaming = isTurnStreaming(doc, scopeEl);
     const draft = readComposerDraft(doc, scopeEl);
+    const localSnap = getLocalTelemetrySnapshot(opts.nowMs);
+    const telemetryMeta = extractTelemetrySummary(localSnap);
+    const attachTelemetry = (res) => {
+      if (!res || !telemetryMeta || res.telemetry) return res;
+      return { ...res, telemetry: { ...telemetryMeta, dataSource: res.source || telemetryMeta.dataSource } };
+    };
 
     // 1) Custom injected provider (used by host integrators & workbench simulator)
     if (typeof opts.getContextSnapshot === 'function') {
@@ -496,7 +589,7 @@
       if (custom && isFiniteNum(custom.usedFraction)) {
         const maxTokens = isFiniteNum(custom.maxTokens) && custom.maxTokens > 0 ? custom.maxTokens : DEFAULT_MAX_TOKENS;
         const usedTokens = isFiniteNum(custom.usedTokens) ? custom.usedTokens : Math.round(custom.usedFraction * maxTokens);
-        return {
+        return attachTelemetry({
           cascadeId: custom.cascadeId || cascadeId,
           streaming: custom.streaming !== undefined ? Boolean(custom.streaming) : streaming,
           draft: custom.draft !== undefined ? String(custom.draft) : draft,
@@ -508,7 +601,8 @@
           compactedCount: Number(custom.compactedCount) || 0,
           compacted: Boolean(custom.compacted),
           source: custom.source || 'custom',
-        };
+          ...(custom.telemetry ? { telemetry: custom.telemetry } : {}),
+        });
       }
     }
 
@@ -536,38 +630,57 @@
       const liveMatches = !liveCid || !hasRealCid || liveCid === normCid;
       const parsed = (liveMatches ? extractFromBridgePayload(live) : null) || fromLatest;
       if (parsed) {
-        return {
+        return attachTelemetry({
           cascadeId,
           streaming,
           draft,
           ...parsed,
           usedPct: Math.round(Math.max(0, parsed.usedFraction) * 100),
-        };
+        });
       }
     }
 
     // 3) Read active pane's Pulse bar shadow DOM if visible
     const fromDomBar = readFromPulseShadowDom(doc, scopeEl);
     if (fromDomBar) {
-      return {
+      return attachTelemetry({
         cascadeId,
         streaming,
         draft,
         ...fromDomBar,
         usedPct: Math.round(Math.max(0, fromDomBar.usedFraction) * 100),
+      });
+    }
+
+    // 4) Read-only local disk / agy-NOV X-Ray telemetry snapshot (30s TTL cache)
+    const fromLocal = resolveFromLocalTelemetry(localSnap, cascadeId);
+    if (fromLocal) {
+      const tel = telemetryMeta || {
+        active5hSessions: 0,
+        active5hSteps: 0,
+        active7dSteps: 0,
+        dataSource: fromLocal.source,
+      };
+      return {
+        cascadeId,
+        streaming,
+        draft,
+        ...fromLocal,
+        usedPct: Math.round(Math.max(0, fromLocal.usedFraction) * 100),
+        telemetry: { ...tel, dataSource: fromLocal.source },
       };
     }
 
-    // 4) Lightweight native active conversation DOM fallback
+    // 5) Lightweight native active conversation DOM fallback
     const est = estimateFromConversationDom(doc, scopeEl);
     if (est) {
-      return {
+      return attachTelemetry({
         cascadeId,
         streaming,
         draft,
         ...est,
         usedPct: Math.round(Math.max(0, est.usedFraction) * 100),
-      };
+      });
     }
 
     return null;
@@ -575,7 +688,10 @@
 
   return {
     DEFAULT_MAX_TOKENS,
+    LOCAL_TELEMETRY_TTL_MS,
     formatTokens,
+    setLocalTelemetrySnapshot,
+    getLocalTelemetrySnapshot,
     isSidebarOrAuxiliaryNode,
     findMainComposerBox,
     findPaneRootForNode,
@@ -590,5 +706,6 @@
     readFromPulseShadowDom,
     analyzeContextBreakdown,
     sampleContextState,
+    readContextSnapshot: sampleContextState,
   };
 });

@@ -15,6 +15,7 @@ import { execFile as nodeExecFile, spawn as nodeSpawn } from 'node:child_process
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
   buildConfigPatchFromOpts,
@@ -26,7 +27,9 @@ import {
 import {
   assertNoSymlinkAncestors,
   atomicRenameWithRetry,
+  canonicalRealpathSync,
   isCliEntry,
+  isPathWithinBase,
   quoteShellArgForDisplay,
   safeChmodSync,
 } from './platform-utils.mjs';
@@ -1621,6 +1624,540 @@ export class SagKeepaliveController {
     this.daemon.stop?.();
     this.emit('keepalive-stopped', { sessionAttempts: this.sessionAttempts });
   }
+}
+
+function escapeXmlEntity(raw) {
+  return String(raw ?? '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+export function buildLaunchAgentPlist({
+  nodePath = process.execPath,
+  cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'sag-cli.mjs'),
+  label = 'local.agy-sag-keepalive',
+  logDir = path.join(os.homedir(), '.gemini', 'antigravity', 'agy-sag', 'logs'),
+} = {}) {
+  const safeLabel = escapeXmlEntity(String(label || 'local.agy-sag-keepalive').trim() || 'local.agy-sag-keepalive');
+  const safeNode = escapeXmlEntity(path.resolve(String(nodePath || process.execPath)));
+  const safeCli = escapeXmlEntity(path.resolve(String(cliPath || '')));
+  const resolvedLogDir = path.resolve(String(logDir || path.join(os.homedir(), '.gemini', 'antigravity', 'agy-sag', 'logs')));
+  const safeOutLog = escapeXmlEntity(path.join(resolvedLogDir, 'keepalive.out.log'));
+  const safeErrLog = escapeXmlEntity(path.join(resolvedLogDir, 'keepalive.err.log'));
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    '<dict>',
+    '  <key>Label</key>',
+    `  <string>${safeLabel}</string>`,
+    '  <key>ProgramArguments</key>',
+    '  <array>',
+    `    <string>${safeNode}</string>`,
+    `    <string>${safeCli}</string>`,
+    '    <string>keepalive</string>',
+    '  </array>',
+    '  <key>RunAtLoad</key>',
+    '  <true/>',
+    '  <key>KeepAlive</key>',
+    '  <dict>',
+    '    <key>SuccessfulExit</key>',
+    '    <false/>',
+    '  </dict>',
+    '  <key>ProcessType</key>',
+    '  <string>Background</string>',
+    '  <key>StandardOutPath</key>',
+    `  <string>${safeOutLog}</string>`,
+    '  <key>StandardErrorPath</key>',
+    `  <string>${safeErrLog}</string>`,
+    '</dict>',
+    '</plist>',
+    '',
+  ].join('\n');
+}
+
+const PRISM_PALETTE_MAP = Object.freeze({
+  native: 'native',
+  obsidian: 'obsidian-prism',
+  'obsidian-prism': 'obsidian-prism',
+  prism: 'obsidian-prism',
+  warm: 'warm-basalt',
+  'warm-basalt': 'warm-basalt',
+  claude: 'warm-basalt',
+  midnight: 'midnight-ink',
+  'midnight-ink': 'midnight-ink',
+  nord: 'nord-frost',
+  'nord-frost': 'nord-frost',
+  oled: 'oled-pure',
+  'oled-pure': 'oled-pure',
+  tokyo: 'tokyo-night',
+  'tokyo-night': 'tokyo-night',
+  catppuccin: 'catppuccin-mocha',
+  'catppuccin-mocha': 'catppuccin-mocha',
+  crystal: 'crystal-day',
+  'crystal-day': 'crystal-day',
+  daylight: 'crystal-day',
+  paper: 'warm-paper',
+  'warm-paper': 'warm-paper',
+  rose: 'rose-dawn',
+  'rose-dawn': 'rose-dawn',
+  matcha: 'matcha-journal',
+  'matcha-journal': 'matcha-journal',
+  phantom: 'phantom-crimson',
+  crimson: 'phantom-crimson',
+  'phantom-crimson': 'phantom-crimson',
+  doodle: 'doodle-sketch',
+  'doodle-sketch': 'doodle-sketch',
+  pixel: 'pixel-terminal',
+  'pixel-terminal': 'pixel-terminal',
+  aurora: 'aurora-glass',
+  'aurora-glass': 'aurora-glass',
+});
+
+const PRISM_ACCENT_ALLOWED = new Set(['follow', 'cobalt', 'iris', 'amber', 'emerald', 'rose', 'mono']);
+const PRISM_CORNER_ALLOWED = new Set(['sharp', 'balanced', 'soft', 'pill']);
+
+function mapPrismPaletteToSagPreset(raw) {
+  const key = String(raw || '').trim().toLowerCase();
+  if (!key) return null;
+  return Object.prototype.hasOwnProperty.call(PRISM_PALETTE_MAP, key) ? PRISM_PALETTE_MAP[key] : null;
+}
+
+function readFirstExistingJsonNoSymlink(candidates) {
+  for (const filePath of candidates) {
+    if (!filePath) continue;
+    const resolved = path.resolve(filePath);
+    try {
+      assertNoSymlinkPath(resolved);
+    } catch (err) {
+      return {
+        path: resolved,
+        ok: false,
+        exists: true,
+        symlinkRejected: true,
+        error: err?.message || String(err),
+        data: null,
+      };
+    }
+    const res = readJsonFileRejectSymlink(resolved);
+    if (res.exists || res.symlinkRejected) {
+      return { path: resolved, ...res };
+    }
+  }
+  return {
+    path: candidates[0] ? path.resolve(candidates[0]) : null,
+    ok: false,
+    exists: false,
+    symlinkRejected: false,
+    error: null,
+    data: null,
+  };
+}
+
+function extractRawThoughtProfiles(thoughtCfg) {
+  if (!thoughtCfg || typeof thoughtCfg !== 'object') return [];
+  const rawProfiles = thoughtCfg.profiles;
+  const list = [];
+  if (Array.isArray(rawProfiles)) {
+    for (const item of rawProfiles) {
+      if (!item || typeof item !== 'object') continue;
+      list.push({
+        id: String(item.id || '').trim(),
+        name: String(item.name || item.id || '').trim(),
+        baseUrl: String(item.baseUrl || item.endpoint || item.url || '').trim(),
+        model: String(item.model || '').trim(),
+        apiKey: typeof item.apiKey === 'string' ? item.apiKey : '',
+      });
+    }
+  } else if (rawProfiles && typeof rawProfiles === 'object') {
+    for (const [k, item] of Object.entries(rawProfiles)) {
+      if (!item || typeof item !== 'object') continue;
+      list.push({
+        id: String(item.id || k || '').trim(),
+        name: String(item.name || k || '').trim(),
+        baseUrl: String(item.baseUrl || item.endpoint || item.url || '').trim(),
+        model: String(item.model || '').trim(),
+        apiKey: typeof item.apiKey === 'string' ? item.apiKey : '',
+      });
+    }
+  }
+  return list.filter((p) => p.name || p.baseUrl || p.model);
+}
+
+function buildPrismMigrationPlan({
+  prismPluginDir,
+  prismConfigDir,
+  sagConfigDir,
+  homeDir = os.homedir(),
+  launchAgentsDir = null,
+} = {}) {
+  const resolvedHome = path.resolve(homeDir || os.homedir());
+  const resolvedPluginDir = path.resolve(
+    prismPluginDir || path.join(resolvedHome, '.gemini', 'config', 'plugins', 'obsidian-prism')
+  );
+  const resolvedPrismCfgDir = path.resolve(
+    prismConfigDir || path.join(resolvedHome, '.gemini', 'config')
+  );
+  const resolvedSagCfgDir = path.resolve(
+    sagConfigDir || path.join(resolvedHome, '.config', 'agy-sag')
+  );
+  const resolvedLaunchAgentsDir = path.resolve(
+    launchAgentsDir || path.join(resolvedHome, 'Library', 'LaunchAgents')
+  );
+
+  const prismConfigCandidates = [
+    path.join(resolvedPluginDir, 'config.json'),
+    path.join(resolvedPrismCfgDir, 'obsidian-prism', 'config.json'),
+  ];
+  if (resolvedPrismCfgDir !== resolvedPluginDir) {
+    prismConfigCandidates.push(path.join(resolvedPrismCfgDir, 'config.json'));
+  }
+  const thoughtConfigCandidates = [
+    path.join(resolvedPrismCfgDir, 'obsidian-prism-thought.json'),
+    path.join(resolvedPluginDir, 'obsidian-prism-thought.json'),
+  ];
+
+  const mainRes = readFirstExistingJsonNoSymlink(prismConfigCandidates);
+  const thoughtRes = readFirstExistingJsonNoSymlink(thoughtConfigCandidates);
+
+  const mainCfg = mainRes.ok && mainRes.data && typeof mainRes.data === 'object' ? mainRes.data : {};
+  const thoughtCfg = thoughtRes.ok && thoughtRes.data && typeof thoughtRes.data === 'object' ? thoughtRes.data : {};
+
+  const suggestedConfig = {
+    modules: {},
+  };
+
+  if (mainCfg.hostLocalization !== undefined) {
+    if (typeof mainCfg.hostLocalization === 'boolean') {
+      suggestedConfig.hostI18n = mainCfg.hostLocalization;
+      suggestedConfig.modules.hostI18n = mainCfg.hostLocalization;
+    } else if (typeof mainCfg.hostLocalization === 'string' && mainCfg.hostLocalization.trim()) {
+      const rawLoc = mainCfg.hostLocalization.trim();
+      const enabledLoc = rawLoc.toLowerCase() !== 'off';
+      suggestedConfig.hostI18n = enabledLoc;
+      suggestedConfig.modules.hostI18n = enabledLoc;
+      if (enabledLoc && rawLoc.toLowerCase() !== 'on') {
+        suggestedConfig.hostI18nLocale = rawLoc;
+      }
+    } else if (mainCfg.hostLocalization && typeof mainCfg.hostLocalization === 'object') {
+      const enabledLoc = mainCfg.hostLocalization.enabled !== false;
+      suggestedConfig.hostI18n = enabledLoc;
+      suggestedConfig.modules.hostI18n = enabledLoc;
+      if (typeof mainCfg.hostLocalization.locale === 'string' && mainCfg.hostLocalization.locale.trim()) {
+        suggestedConfig.hostI18nLocale = mainCfg.hostLocalization.locale.trim();
+      }
+    }
+  }
+  const explicitLang = typeof mainCfg.language === 'string' ? mainCfg.language.trim() : typeof mainCfg.lang === 'string' ? mainCfg.lang.trim() : '';
+  if (explicitLang && !suggestedConfig.hostI18nLocale) {
+    suggestedConfig.hostI18nLocale = explicitLang;
+  }
+
+  const mappedPalette = mapPrismPaletteToSagPreset(mainCfg.palette);
+  if (mappedPalette) {
+    suggestedConfig.themePreset = mappedPalette;
+    if (mappedPalette !== 'native') suggestedConfig.modules.themeStudio = true;
+  }
+  if (mainCfg.lightPreset !== undefined) {
+    const mappedLight = mapPrismPaletteToSagPreset(mainCfg.lightPreset);
+    suggestedConfig.themeAutoPair = Boolean(mainCfg.lightPreset && String(mainCfg.lightPreset).trim().toLowerCase() !== 'off');
+    if (mappedLight && !suggestedConfig.themePreset) {
+      suggestedConfig.themePreset = mappedLight;
+    }
+  }
+  if (typeof mainCfg.accentTone === 'string') {
+    const acc = mainCfg.accentTone.trim().toLowerCase();
+    if (PRISM_ACCENT_ALLOWED.has(acc)) suggestedConfig.themeAccent = acc;
+  }
+  if (typeof mainCfg.cornerStyle === 'string') {
+    const cor = mainCfg.cornerStyle.trim().toLowerCase();
+    if (PRISM_CORNER_ALLOWED.has(cor)) suggestedConfig.themeCorners = cor;
+  }
+  if (typeof mainCfg.smoothCaret === 'boolean') {
+    suggestedConfig.themeSmoothCaret = mainCfg.smoothCaret;
+  }
+
+  const rawThoughtMode = typeof mainCfg.thoughtTranslate === 'string' ? mainCfg.thoughtTranslate.trim().toLowerCase() : '';
+  const thoughtEnabled =
+    typeof mainCfg.thoughtTranslate === 'boolean'
+      ? mainCfg.thoughtTranslate
+      : rawThoughtMode
+        ? rawThoughtMode !== 'off'
+        : typeof thoughtCfg.enabled === 'boolean'
+          ? thoughtCfg.enabled
+          : undefined;
+  if (thoughtEnabled !== undefined) {
+    suggestedConfig.thoughtTranslate = thoughtEnabled;
+    suggestedConfig.modules.thoughtTranslate = thoughtEnabled;
+    if (thoughtEnabled) {
+      suggestedConfig.thoughtEngine = rawThoughtMode === 'mt' ? 'mt' : 'openai';
+    }
+  }
+  const thoughtView = mainCfg.thoughtView ?? thoughtCfg.viewMode ?? thoughtCfg.thoughtView;
+  if (typeof thoughtView === 'string' && thoughtView.trim()) {
+    const v = thoughtView.trim().toLowerCase();
+    suggestedConfig.thoughtViewMode = v === 'immersive' || v === 'translated' ? 'translated' : 'bilingual';
+  }
+  const translateTitles = mainCfg.translateTitles ?? thoughtCfg.translateTitles;
+  if (typeof translateTitles === 'boolean') {
+    suggestedConfig.thoughtTranslateTitles = translateTitles;
+  }
+  const stylePreset = thoughtCfg.stylePreset ?? mainCfg.stylePreset;
+  if (typeof stylePreset === 'string' && stylePreset.trim()) {
+    suggestedConfig.thoughtStylePreset = stylePreset.trim();
+  }
+  const proxyMode = thoughtCfg.proxyMode ?? mainCfg.proxyMode;
+  if (typeof proxyMode === 'string' && proxyMode.trim()) {
+    suggestedConfig.thoughtProxyMode = proxyMode.trim();
+  }
+  const activeProfile = thoughtCfg.activeProfileId ?? thoughtCfg.activeProfile ?? mainCfg.activeProfileId ?? mainCfg.activeProfile;
+  if (typeof activeProfile === 'string' && activeProfile.trim()) {
+    suggestedConfig.thoughtActiveProfile = activeProfile.trim();
+  }
+
+  const rawProfiles = extractRawThoughtProfiles(thoughtCfg);
+  const sanitizedProfiles = rawProfiles.map((p, idx) => ({
+    id: p.id || `prism_${idx + 1}`,
+    name: p.name,
+    baseUrl: p.baseUrl,
+    model: p.model,
+    hasApiKey: Boolean(p.apiKey && p.apiKey.trim().length > 0),
+    active: Boolean(activeProfile && (p.id === activeProfile || p.name === activeProfile)),
+  }));
+
+  const prismWatchPlistPath = path.join(resolvedLaunchAgentsDir, 'local.antigravity-prism-watch.plist');
+  let prismWatchDetected = false;
+  try {
+    const st = fs.lstatSync(prismWatchPlistPath);
+    prismWatchDetected = Boolean(st && !st.isSymbolicLink() && st.isFile());
+  } catch {
+    prismWatchDetected = false;
+  }
+
+  const recommendations = [];
+  if (prismWatchDetected) {
+    recommendations.push(
+      'Detected local.antigravity-prism-watch LaunchAgent: disable Prism watch agent (do NOT delete obsidian-prism/plugin.json to preserve rollback) or switch to agy-Sag LaunchAgent via buildLaunchAgentPlist().'
+    );
+  } else if (mainRes.exists || thoughtRes.exists) {
+    recommendations.push(
+      'To avoid duplicate CDP injection, disable Obsidian Prism in Antigravity plugins (keep obsidian-prism/plugin.json intact) or run agy-Sag LaunchAgent.'
+    );
+  }
+  if (sanitizedProfiles.some((p) => p.hasApiKey)) {
+    recommendations.push(
+      'Thought translation API keys are never returned in inspect output and must only be written to an isolated 0600 secrets file outside ~/.gemini/antigravity/.'
+    );
+  }
+
+  return {
+    publicReport: {
+      ok: true,
+      readOnly: true,
+      sources: {
+        prismConfigPath: mainRes.exists ? mainRes.path : null,
+        prismConfigFound: Boolean(mainRes.exists && mainRes.ok),
+        thoughtConfigPath: thoughtRes.exists ? thoughtRes.path : null,
+        thoughtConfigFound: Boolean(thoughtRes.exists && thoughtRes.ok),
+        symlinkRejected: Boolean(mainRes.symlinkRejected || thoughtRes.symlinkRejected),
+      },
+      sagConfigDir: resolvedSagCfgDir,
+      suggestedConfig,
+      thoughtProfiles: sanitizedProfiles,
+      prismWatchDetected,
+      prismWatchPlistPath,
+      recommendations,
+    },
+    internalSecrets: {
+      activeProfile: typeof activeProfile === 'string' ? activeProfile.trim() : null,
+      proxyMode: typeof proxyMode === 'string' && proxyMode.trim() ? proxyMode.trim() : 'auto',
+      customProxyUrl: typeof thoughtCfg.customProxyUrl === 'string' ? thoughtCfg.customProxyUrl.trim() : '',
+      stylePreset: typeof stylePreset === 'string' && stylePreset.trim() ? stylePreset.trim() : 'technical',
+      customPrompt: typeof thoughtCfg.customPrompt === 'string' ? thoughtCfg.customPrompt.trim().slice(0, 600) : '',
+      profiles: rawProfiles,
+    },
+  };
+}
+
+export function inspectPrismMigration(options = {}) {
+  return buildPrismMigrationPlan(options).publicReport;
+}
+
+function writeJsonAtomic0600(filePath, dataObj, { platform = process.platform, renameSyncFn = fs.renameSync, waitFn = null } = {}) {
+  const resolved = path.resolve(filePath);
+  assertNoSymlinkPath(resolved);
+  const dir = path.dirname(resolved);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  safeChmodSync(dir, 0o700, { platform });
+  assertNoSymlinkPath(resolved);
+
+  const tmpName = `.sag-migrate.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+  const tmpPath = path.join(dir, tmpName);
+  const payload = JSON.stringify(dataObj, null, 2) + '\n';
+  try {
+    fs.writeFileSync(tmpPath, payload, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    safeChmodSync(tmpPath, 0o600, { platform });
+    atomicRenameWithRetry(tmpPath, resolved, { platform, renameSyncFn, waitFn });
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch {}
+    throw err;
+  }
+  return resolved;
+}
+
+export function applyPrismMigration({
+  prismPluginDir,
+  prismConfigDir,
+  sagConfigDir,
+  sagSecretsPath,
+  dryRun = true,
+  homeDir = os.homedir(),
+  launchAgentsDir = null,
+  platform = process.platform,
+} = {}) {
+  const resolvedHome = path.resolve(homeDir || os.homedir());
+  const plan = buildPrismMigrationPlan({
+    prismPluginDir,
+    prismConfigDir,
+    sagConfigDir,
+    homeDir: resolvedHome,
+    launchAgentsDir,
+  });
+  const report = plan.publicReport;
+  const resolvedConfigPath = path.join(report.sagConfigDir, 'config.json');
+  const resolvedSecretsPath = path.resolve(
+    sagSecretsPath || path.join(report.sagConfigDir, 'translator-secrets.json')
+  );
+
+  // Never allow writing secrets into ~/.gemini/antigravity/
+  const forbiddenAgDir = path.join(resolvedHome, '.gemini', 'antigravity');
+  const canonicalizeAllowMissing = (p) => {
+    const abs = path.resolve(p);
+    const tail = [];
+    let cur = abs;
+    while (true) {
+      try {
+        const real = canonicalRealpathSync(cur);
+        return tail.length ? path.join(real, ...tail.reverse()) : real;
+      } catch {
+        const parent = path.dirname(cur);
+        if (parent === cur) return abs;
+        tail.push(path.basename(cur));
+        cur = parent;
+      }
+    }
+  };
+  if (
+    isPathWithinBase(canonicalizeAllowMissing(resolvedSecretsPath), canonicalizeAllowMissing(forbiddenAgDir)) ||
+    isPathWithinBase(canonicalizeAllowMissing(resolvedConfigPath), canonicalizeAllowMissing(forbiddenAgDir))
+  ) {
+    throw new Error(`Security violation: refusing to write migration files inside ${forbiddenAgDir}`);
+  }
+
+  const isDryRun = dryRun !== false;
+  if (isDryRun) {
+    return {
+      ...report,
+      dryRun: true,
+      written: false,
+      configPath: resolvedConfigPath,
+      secretsPath: resolvedSecretsPath,
+      prismFilesModified: false,
+    };
+  }
+
+  writeJsonAtomic0600(
+    resolvedConfigPath,
+    {
+      version: 1,
+      migratedFrom: 'obsidian-prism',
+      migratedAt: new Date().toISOString(),
+      ...report.suggestedConfig,
+    },
+    { platform }
+  );
+
+  let secretsWritten = false;
+  if (plan.internalSecrets.profiles.length > 0) {
+    // Preserve existing non-OpenAI provider secrets & non-colliding profiles if target file already exists
+    let existingStore = null;
+    try {
+      assertNoSymlinkPath(resolvedSecretsPath);
+      const st = fs.lstatSync(resolvedSecretsPath);
+      if (st && !st.isSymbolicLink() && st.isFile() && st.size <= 256 * 1024) {
+        const parsed = JSON.parse(fs.readFileSync(resolvedSecretsPath, 'utf8'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existingStore = parsed;
+      }
+    } catch {
+      existingStore = null;
+    }
+    const mappedProfiles = plan.internalSecrets.profiles.map((p, idx) => ({
+      id: p.id || `prism_${idx + 1}`,
+      name: p.name || `Prism ${idx + 1}`,
+      engine: 'openai',
+      baseUrl: p.baseUrl || '',
+      model: p.model || '',
+      apiKey: p.apiKey || '',
+    }));
+    const existingProfiles = Array.isArray(existingStore?.profiles) ? existingStore.profiles : [];
+    const mappedIds = new Set(mappedProfiles.map((p) => p.id));
+    const mergedProfiles = [
+      ...existingProfiles.filter((p) => p && typeof p === 'object' && p.id && !mappedIds.has(p.id)),
+      ...mappedProfiles,
+    ];
+    const activeObj =
+      mappedProfiles.find(
+        (p) =>
+          plan.internalSecrets.activeProfile &&
+          (p.id === plan.internalSecrets.activeProfile || p.name === plan.internalSecrets.activeProfile)
+      ) ||
+      mappedProfiles.find((p) => p.apiKey) ||
+      mappedProfiles[0];
+    const existingProviders =
+      existingStore?.providers && typeof existingStore.providers === 'object' ? existingStore.providers : {};
+    writeJsonAtomic0600(
+      resolvedSecretsPath,
+      {
+        ...(existingStore || {}),
+        version: 1,
+        migratedFrom: 'obsidian-prism-thought',
+        migratedAt: new Date().toISOString(),
+        proxyMode: plan.internalSecrets.proxyMode || existingStore?.proxyMode || 'auto',
+        customProxyUrl: plan.internalSecrets.customProxyUrl || existingStore?.customProxyUrl || '',
+        stylePreset: plan.internalSecrets.stylePreset || existingStore?.stylePreset || 'technical',
+        customPrompt: plan.internalSecrets.customPrompt || existingStore?.customPrompt || '',
+        activeProfileId: activeObj?.id || existingStore?.activeProfileId || '',
+        profiles: mergedProfiles,
+        providers: {
+          ...existingProviders,
+          openai: {
+            baseUrl: activeObj?.baseUrl || existingProviders.openai?.baseUrl || 'https://api.openai.com/v1',
+            model: activeObj?.model || existingProviders.openai?.model || 'gpt-4o-mini',
+            apiKey: activeObj?.apiKey || existingProviders.openai?.apiKey || '',
+          },
+        },
+      },
+      { platform }
+    );
+    secretsWritten = true;
+  }
+
+  return {
+    ...report,
+    readOnly: false,
+    dryRun: false,
+    written: true,
+    configWritten: true,
+    secretsWritten,
+    configPath: resolvedConfigPath,
+    secretsPath: resolvedSecretsPath,
+    prismFilesModified: false,
+  };
 }
 
 export async function runKeepaliveCli(argv = [], deps = {}) {

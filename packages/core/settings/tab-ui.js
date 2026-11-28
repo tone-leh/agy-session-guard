@@ -483,6 +483,36 @@
     const advThemeBody = doc.createElement('div');
     advThemeBody.className = 'ag-sag-details-body';
 
+    const chatFontRow = doc.createElement('div');
+    chatFontRow.className = 'ag-sag-ext-grid';
+    for (const [cfId, cfLbl] of [
+      ['default', t('chatFontDefault', 'Default')],
+      ['system', t('chatFontSystem', 'System Sans')],
+      ['pingfang', t('chatFontPingfang', 'PingFang/CJK')],
+      ['noto', t('chatFontNoto', 'Noto Sans')],
+      ['serif', t('chatFontSerif', 'Serif')],
+    ]) {
+      chatFontRow.appendChild(
+        mkChip({
+          label: cfLbl,
+          active: themeOn && (cfg.themeChatFont || 'default') === cfId,
+          attr: 'data-ag-sag-theme-chat-font',
+          val: cfId,
+          onClick: () =>
+            updateConfig({
+              themeChatFont: cfId,
+              modules: { ...cfg.modules, themeStudio: true },
+            }),
+        })
+      );
+    }
+    advThemeBody.appendChild(
+      mkSuiteRow(t('themeSubChatFont', 'Chat Font'), '', chatFontRow, {
+        stacked: true,
+        searchExtra: 'themeChatFont system pingfang noto serif',
+      })
+    );
+
     advThemeBody.appendChild(
       mkSuiteRow(
         t('themeCjk', 'CJK Font Tuning'),
@@ -1126,6 +1156,44 @@
             })
             .catch((err) => setThStatus(err?.message || 'Test failed', 'error'));
         },
+      })
+    );
+    if (typeof options.onTranslatorClearCache === 'function') {
+      provBtns.appendChild(
+        mkChip({
+          label: t('thoughtClearCacheBtn', 'Clear Cache'),
+          active: false,
+          testId: 'ag-sag-thought-clearcache-btn',
+          onClick: () => {
+            Promise.resolve(options.onTranslatorClearCache())
+              .then((res) => {
+                if (res?.ok) setThStatus(t('thoughtCacheCleared', 'Cache cleared'), 'ok');
+                else setThStatus(res?.error || 'Clear cache failed', 'error');
+              })
+              .catch((err) => setThStatus(err?.message || 'Clear cache failed', 'error'));
+          },
+        })
+      );
+    }
+    const styleWrap = doc.createElement('div');
+    styleWrap.className = 'ag-sag-ext-grid';
+    for (const [sid, sLbl] of [
+      ['technical', t('thoughtStyleTech', 'Technical Notes')],
+      ['concise', t('thoughtStyleConcise', 'Concise')],
+    ]) {
+      styleWrap.appendChild(
+        mkChip({
+          label: sLbl,
+          active: (cfg.thoughtStylePreset || 'technical') === sid,
+          attr: 'data-ag-sag-thought-style',
+          val: sid,
+          onClick: () => updateConfig({ thoughtStylePreset: sid }),
+        })
+      );
+    }
+    thBody.appendChild(
+      mkSuiteRow(t('thoughtStyleLabel', 'Style Preset'), '', styleWrap, {
+        searchExtra: 'thoughtStylePreset technical concise prompt',
       })
     );
     provWrap.appendChild(provBtns);
