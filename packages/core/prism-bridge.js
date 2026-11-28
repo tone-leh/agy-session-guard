@@ -286,7 +286,11 @@
 
     function ensureStyle() {
       if (!doc || !styles) return;
-      if (doc.getElementById?.(styles.STYLE_ID)) return;
+      const existing = doc.getElementById?.(styles.STYLE_ID);
+      if (existing) {
+        if (existing.textContent !== styles.CORE_CSS) existing.textContent = styles.CORE_CSS;
+        return;
+      }
       const el = doc.createElement('style');
       el.id = styles.STYLE_ID;
       el.textContent = styles.CORE_CSS;

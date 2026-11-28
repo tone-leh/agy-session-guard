@@ -315,7 +315,13 @@
 
     function ensureStyle() {
       if (!doc || !styles) return;
-      if (doc.getElementById?.(styles.STYLE_ID)) return;
+      const existing = doc.getElementById?.(styles.STYLE_ID);
+      if (existing) {
+        if (existing.textContent !== styles.CORE_CSS) {
+          existing.textContent = styles.CORE_CSS;
+        }
+        return;
+      }
       const el = doc.createElement('style');
       el.id = styles.STYLE_ID;
       el.textContent = styles.CORE_CSS;
@@ -480,11 +486,39 @@
       return embeddedCount;
     }
 
-    function appendMetric(grid, label, value, testAttr) {
-      const cell = mk('div', 'ag-sg-card-metric', undefined, testAttr ? { 'data-ag-sag-card-metric': testAttr } : null);
-      cell.appendChild(mk('span', 'ag-sg-card-mk', label));
-      cell.appendChild(mk('span', 'ag-sg-card-mv', value));
-      grid.appendChild(cell);
+    function formatResetCompact(sec) {
+      const s = Number(sec);
+      if (!Number.isFinite(s) || s <= 0) return '';
+      const h = Math.floor(s / 3600);
+      const m = Math.max(1, Math.ceil((s % 3600) / 60));
+      if (h > 0) return `${h}h${m < 60 ? `${m}m` : ''}`;
+      return `${m}m`;
+    }
+
+    function ratioTone(pct, limited = false) {
+      if (limited || pct >= 95) return 'danger';
+      if (pct >= 80) return 'warn';
+      if (pct >= 60) return 'warm';
+      return 'ok';
+    }
+
+    function appendMeterRow(container, { label, pct, sub, tone, testAttr, title }) {
+      const row = mk('div', 'ag-sag-meter', undefined, testAttr ? { 'data-ag-sag-card-metric': testAttr } : null);
+      if (title) row.title = title;
+      const top = mk('div', 'ag-sag-meter-head');
+      top.appendChild(mk('span', 'ag-sag-meter-label', label));
+      const valWrap = mk('span', 'ag-sag-meter-val');
+      if (sub) valWrap.appendChild(mk('span', 'ag-sag-meter-sub', sub));
+      valWrap.appendChild(mk('span', 'ag-sag-meter-pct', pct === null ? '—' : `${pct}%`, { 'data-tone': tone || 'ok' }));
+      top.appendChild(valWrap);
+      row.appendChild(top);
+      const track = mk('div', 'ag-sag-quota-bar ag-sag-meter-track');
+      const fill = mk('span', 'ag-sag-quota-bar-fill', undefined, { 'data-tone': tone || 'ok' });
+      const clamped = pct === null ? 0 : Math.max(0, Math.min(100, pct));
+      if (fill.style) fill.style.width = `${clamped}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      container.appendChild(row);
     }
 
     function renderStandaloneCard() {
@@ -495,50 +529,141 @@
       const cfg = getConfig();
       const mods = cfg.modules || {};
       const strings = S();
+      const sagStr = typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
       const snap = lastState.snap;
-      const pct = snap && typeof snap.usedPct === 'number' ? `${snap.usedPct}%` : '—';
+      const ctxPct = snap && typeof snap.usedPct === 'number' ? Math.max(0, Math.min(100, Math.round(snap.usedPct))) : null;
       const usedLbl = snap ? ctxSrc.formatTokens(snap.usedTokens) : '—';
       const maxLbl = snap ? ctxSrc.formatTokens(snap.maxTokens) : '—';
-      const tokText = snap ? `${usedLbl} / ${maxLbl}` : '—';
+      const tokText = snap ? `${usedLbl} / ${maxLbl}` : '';
       const bmCount = Number(lastState.bookmarkCount) || 0;
       const thText = cfg.compactThreshold === 'off' ? strings.cfgThresholdOff : `${cfg.compactThreshold}%`;
 
       while (cardEl.firstChild) cardEl.removeChild(cardEl.firstChild);
 
-      const head = doc.createElement('div');
-      head.className = 'ag-sg-card-head';
-      const titleEl = doc.createElement('span');
-      titleEl.className = 'ag-sg-card-title';
-      titleEl.textContent = strings.brand;
-      const metaWrap = doc.createElement('span');
-      metaWrap.className = 'ag-sg-card-meta';
+      // 1. Minimal header: title + quiet timing / source note (no noisy DOM Est pill)
+      const head = mk('div', 'ag-sg-card-head');
+      head.appendChild(mk('span', 'ag-sg-card-title', sagStr.cardHeaderTitle || 'Usage & Context'));
+      const metaWrap = mk('span', 'ag-sg-card-meta');
       const lastElapsed = Number(lastState.watchdog?.lastTurnElapsedSec);
-      const pctLabel =
+      const elapsedText =
         mods.sessionWatchdog && Number.isFinite(lastElapsed) && lastElapsed > 0
-          ? `${pct} · ⏱ ${lastElapsed >= 60 ? formatDurationMMSS(lastElapsed) : `${lastElapsed}s`}`
-          : pct;
-      const srcTag = formatDataSourceLabel(snap?.source || snap?.telemetry?.dataSource);
-      if (srcTag) {
-        const pctSpan = doc.createElement('span');
-        pctSpan.textContent = `${pctLabel} `;
-        const srcBadge = doc.createElement('span');
-        srcBadge.className = 'ag-sag-card-source';
-        srcBadge.setAttribute('data-testid', 'ag-sag-card-source');
-        srcBadge.setAttribute('data-source', String(snap?.source || snap?.telemetry?.dataSource || ''));
-        srcBadge.textContent = srcTag;
-        if (srcBadge.style) Object.assign(srcBadge.style, { marginLeft: '4px', padding: '1px 5px', borderRadius: '999px', fontSize: '10px', border: '1px solid var(--border,rgba(148,163,184,0.28))', opacity: '0.88' });
-        metaWrap.appendChild(pctSpan);
-        metaWrap.appendChild(srcBadge);
-      } else {
-        metaWrap.textContent = pctLabel;
+          ? `${lastElapsed >= 60 ? formatDurationMMSS(lastElapsed) : `${lastElapsed}s`}`
+          : '';
+      const rawSrc = String(snap?.source || snap?.telemetry?.dataSource || '');
+      const srcTag = formatDataSourceLabel(rawSrc);
+      if (elapsedText) {
+        metaWrap.appendChild(mk('span', 'ag-sag-card-elapsed', elapsedText));
       }
-      head.appendChild(titleEl);
+      if (srcTag && rawSrc !== 'dom-est') {
+        const srcEl = mk('span', 'ag-sag-card-source', srcTag, {
+          'data-testid': 'ag-sag-card-source',
+          'data-source': rawSrc,
+        });
+        metaWrap.appendChild(srcEl);
+      } else if (srcTag) {
+        metaWrap.title = srcTag;
+      }
       head.appendChild(metaWrap);
       cardEl.appendChild(head);
 
-      const sagStr = typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
+      // 2. Primary visual focus: 3 clean horizontal meters (5h Quota, Weekly Quota, Context)
+      const meters = mk('div', 'ag-sag-meters');
+      const turnsUnit = sagStr.cardTurnsUnit || 'turns';
 
-      // Context Breakdown Lens (pure local DOM breakdown + Top-3 heaviest turns, 3s TTL cache)
+      if (mods.quotaPulse && lastState.quota) {
+        const q = lastState.quota;
+        const obs = q.observed || {};
+        const loc = q.localEstimate || {};
+        const lim = q.limits || {};
+        const turns5h = Number(loc.turns5h) || 0;
+        const soft5h = Number(lim.softTurns5h) || 60;
+        const turns7d = Number(loc.turns7d) || 0;
+        const soft7d = Number(lim.softTurns7d) || 350;
+
+        const obs5hPct =
+          obs.bucket === '5h' || obs.bucket === 'unknown'
+            ? (typeof obs.observedPct === 'number' && Number.isFinite(obs.observedPct) ? Math.round(obs.observedPct) : null)
+            : null;
+        const obs7dPct =
+          obs.bucket === 'weekly'
+            ? (typeof obs.observedPct === 'number' && Number.isFinite(obs.observedPct) ? Math.round(obs.observedPct) : null)
+            : null;
+
+        const pct5h = obs.rateLimited && obs.bucket !== 'weekly'
+          ? 100
+          : obs5hPct !== null
+            ? obs5hPct
+            : Math.min(100, Math.round((turns5h / Math.max(1, soft5h)) * 100));
+        const pct7d = obs.rateLimited && obs.bucket === 'weekly'
+          ? 100
+          : obs7dPct !== null
+            ? obs7dPct
+            : Math.min(100, Math.round((turns7d / Math.max(1, soft7d)) * 100));
+
+        const resetStr = obs.remainingSec ? formatResetCompact(obs.remainingSec) : '';
+        const resetHint = resetStr ? formatTpl(sagStr.cardResetIn || 'Resets in {t}', { t: resetStr }) : '';
+        const sub5h = obs.bucket !== 'weekly' && resetHint ? resetHint : `${turns5h}/${soft5h} ${turnsUnit}`;
+        const sub7d = obs.bucket === 'weekly' && resetHint ? resetHint : `${turns7d}/${soft7d} ${turnsUnit}`;
+
+        appendMeterRow(meters, {
+          label: sagStr.cardQuota5h || strings.cardQuotaLabel || '5h Quota',
+          pct: pct5h,
+          sub: sub5h,
+          tone: ratioTone(pct5h, Boolean(obs.rateLimited && obs.bucket !== 'weekly')),
+          testAttr: 'quota',
+        });
+        appendMeterRow(meters, {
+          label: sagStr.cardQuota7d || 'Weekly Quota',
+          pct: pct7d,
+          sub: sub7d,
+          tone: ratioTone(pct7d, Boolean(obs.rateLimited && obs.bucket === 'weekly')),
+          testAttr: 'quota-7d',
+        });
+      }
+
+      if (mods.compactGuard) {
+        const autoNote = cfg.compactThreshold === 'off' ? '' : formatTpl(sagStr.cardAutoAt || 'Auto at {th}', { th: thText });
+        const ctxSub = [tokText, cfg.compactThreshold === 'off' ? '' : thText].filter(Boolean).join(' · ');
+        appendMeterRow(meters, {
+          label: sagStr.cardContextTitle || strings.cardContextLabel || 'Context',
+          pct: ctxPct,
+          sub: ctxSub,
+          tone: ratioTone(ctxPct ?? 0, false),
+          testAttr: 'context',
+          title: [tokText, autoNote].filter(Boolean).join(' · '),
+        });
+      }
+
+      if (meters.children.length > 0) cardEl.appendChild(meters);
+
+      // 3. Quiet conditional chips: ONLY render non-zero / active items (zero clutter when idle)
+      const chips = mk('div', 'ag-sag-card-chips');
+      const etaTurns = Number(lastState.watchdog?.estimatedTurnsLeft) || 0;
+      if (mods.sessionWatchdog && etaTurns > 0) {
+        chips.appendChild(mk('span', 'ag-sag-card-chip', formatTpl(sagStr.cardChipEta || '~{n} turns left', { n: etaTurns }), { 'data-ag-sag-card-metric': 'eta' }));
+      }
+      if (mods.outlineBookmarks && bmCount > 0) {
+        if (typeof options.onOpenVault === 'function') {
+          chips.appendChild(mkBtn('ag-sag-card-chip ag-sag-card-chip-btn', `★ ${bmCount}`, { 'data-ag-sg-card-act': 'open-vault', 'data-ag-sag-card-metric': 'bookmarks' }, () => { close(); options.onOpenVault(); }));
+        } else {
+          chips.appendChild(mk('span', 'ag-sag-card-chip', `★ ${bmCount}`, { 'data-ag-sag-card-metric': 'bookmarks' }));
+        }
+      }
+      if (mods.draftGuard !== false && lastState.hasDraft) {
+        chips.appendChild(mk('span', 'ag-sag-card-chip', sagStr.cardChipDraft || 'Draft saved', { 'data-ag-sag-card-metric': 'draft' }));
+      }
+      const qCnt = mods.promptQueue && lastState.queue ? Number(lastState.queue.itemCount) || 0 : 0;
+      if (qCnt > 0) {
+        chips.appendChild(mk('span', 'ag-sag-card-chip', formatTpl(sagStr.cardChipQueue || '{n} queued', { n: qCnt }), { 'data-ag-sag-card-metric': 'queue' }));
+      }
+      const novInfo = buildNovInput(cfg);
+      if (novInfo.connected) {
+        chips.appendChild(mk('span', 'ag-sag-card-chip', `NOV ${novInfo.enabledCount}/${novInfo.total}`, { 'data-ag-sag-card-metric': 'nov' }));
+      }
+      if (chips.children.length > 0) cardEl.appendChild(chips);
+
+      // 4. Collapsible breakdown & activity details (collapsed by default so main view stays clean)
+      let lensNode = null;
       if (mods.compactGuard && typeof ctxSrc?.analyzeContextBreakdown === 'function') {
         const nowMs = Date.now();
         const curCid = String(lastState.snap?.cascadeId || '');
@@ -547,151 +672,75 @@
         }
         const bd = lastBreakdownCache.data;
         if (bd && bd.totalChars > 0) {
-          const lens = doc.createElement('div');
-          lens.className = 'ag-sag-ctx-lens';
-          lens.setAttribute('data-testid', 'ag-sag-ctx-lens');
-
-          const bar = doc.createElement('div');
-          bar.className = 'ag-sag-ctx-bar';
+          const lens = mk('div', 'ag-sag-ctx-lens', undefined, { 'data-testid': 'ag-sag-ctx-lens' });
+          const bar = mk('div', 'ag-sag-ctx-bar');
           const segDefs = [
             { kind: 'user', pct: bd.shares.userPct, label: sagStr.ctxLensUser || 'User' },
-            { kind: 'assistant', pct: bd.shares.assistantPct, label: sagStr.ctxLensAssistant || 'Assistant' },
-            { kind: 'code', pct: bd.shares.codeToolsPct, label: sagStr.ctxLensCodeTools || 'Code/Tools' },
+            { kind: 'assistant', pct: bd.shares.assistantPct, label: sagStr.ctxLensAssistant || 'Reply' },
+            { kind: 'code', pct: bd.shares.codeToolsPct, label: sagStr.ctxLensCodeTools || 'Code' },
           ];
           for (const sd of segDefs) {
             if (sd.pct <= 0) continue;
-            const part = doc.createElement('span');
-            part.className = 'ag-sag-ctx-bar-seg';
-            part.setAttribute('data-kind', sd.kind);
+            const part = mk('span', 'ag-sag-ctx-bar-seg', undefined, { 'data-kind': sd.kind });
             if (part.style) part.style.width = `${sd.pct}%`;
             part.title = `${sd.label} ${sd.pct}%`;
             bar.appendChild(part);
           }
           lens.appendChild(bar);
-
-          const legend = doc.createElement('div');
-          legend.className = 'ag-sag-ctx-legend';
-          legend.textContent = `${sagStr.ctxLensUser || 'User'} ${bd.shares.userPct}% · ${sagStr.ctxLensAssistant || 'AI'} ${bd.shares.assistantPct}% · ${sagStr.ctxLensCodeTools || 'Code/Tools'} ${bd.shares.codeToolsPct}%`;
-          lens.appendChild(legend);
-
+          lens.appendChild(
+            mk(
+              'div',
+              'ag-sag-ctx-legend',
+              `${sagStr.ctxLensUser || 'User'} ${bd.shares.userPct}% · ${sagStr.ctxLensAssistant || 'Reply'} ${bd.shares.assistantPct}% · ${sagStr.ctxLensCodeTools || 'Code'} ${bd.shares.codeToolsPct}%`
+            )
+          );
           if (bd.topTurns && bd.topTurns.length > 0) {
-            const topRow = doc.createElement('div');
-            topRow.className = 'ag-sag-ctx-top-turns';
-            topRow.setAttribute('data-testid', 'ag-sag-ctx-top-turns');
+            const topRow = mk('div', 'ag-sag-ctx-top-turns', undefined, { 'data-testid': 'ag-sag-ctx-top-turns' });
             for (const tt of bd.topTurns) {
-              const jb = doc.createElement('button');
-              jb.type = 'button';
-              jb.className = 'ag-sag-ctx-turn-chip';
-              jb.setAttribute('data-ag-sag-jump-turn', String(tt.turnNum));
-              jb.textContent = `#${tt.turnNum} · ${tt.pctOfChat}%`;
-              jb.title = `#${tt.turnNum} (~${ctxSrc.formatTokens(tt.estTokens)}) ${tt.preview || ''}`.trim();
-              jb.addEventListener('click', (ev) => {
-                ev?.preventDefault?.();
-                ev?.stopPropagation?.();
+              const jb = mkBtn('ag-sag-ctx-turn-chip', `#${tt.turnNum} · ${tt.pctOfChat}%`, { 'data-ag-sag-jump-turn': String(tt.turnNum) }, () => {
                 close();
-                try {
-                  tt.node?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-                } catch {}
+                try { tt.node?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }); } catch {}
               });
+              jb.title = `#${tt.turnNum} (~${ctxSrc.formatTokens(tt.estTokens)}) ${tt.preview || ''}`.trim();
               topRow.appendChild(jb);
             }
             lens.appendChild(topRow);
           }
-          cardEl.appendChild(lens);
+          lensNode = lens;
         }
       }
 
-      const grid = doc.createElement('div');
-      grid.className = 'ag-sg-card-grid';
-
-      if (mods.compactGuard) {
-        appendMetric(grid, strings.cardContextLabel, tokText, 'context');
-        appendMetric(grid, strings.cardAutoCompactLabel || 'Auto-compact', thText, 'auto-compact');
-      }
-
-      if (mods.sessionWatchdog && Number(lastState.watchdog?.estimatedTurnsLeft) > 0) {
-        appendMetric(
-          grid,
-          strings.cardEtaLabel || 'Est. left',
-          i18n.formatTemplate(strings.cardTurnsVal || '~{n} turns', { n: lastState.watchdog.estimatedTurnsLeft }),
-          'eta'
-        );
-      }
-
-      if (mods.outlineBookmarks) {
-        const bmCell = mk('div', 'ag-sg-card-metric', undefined, { 'data-ag-sag-card-metric': 'bookmarks' });
-        bmCell.appendChild(mk('span', 'ag-sg-card-mk', strings.cardBookmarksLabel));
-        if (bmCount > 0 && typeof options.onOpenVault === 'function') {
-          bmCell.appendChild(mkBtn('ag-sg-card-link', `★ ${bmCount}`, { 'data-ag-sg-card-act': 'open-vault' }, () => { close(); options.onOpenVault(); }));
-        } else {
-          bmCell.appendChild(mk('span', 'ag-sg-card-mv', String(bmCount)));
-        }
-        grid.appendChild(bmCell);
-      }
-
-      if (mods.draftGuard !== false) {
-        appendMetric(grid, strings.cardDraftLabel || 'Draft', lastState.hasDraft ? (strings.cardDraftSaved || 'Saved') : (strings.cardDraftNone || 'None'), 'draft');
-      }
-
-      if (mods.quotaPulse && lastState.quota) {
-        const qPct = computeQuotaPct(lastState.quota);
-        const turns5h = Number(lastState.quota.localEstimate?.turns5h) || 0;
-        const soft5h = Number(lastState.quota.limits?.softTurns5h) || 60;
-        const qCell = mk('div', 'ag-sg-card-metric', undefined, { 'data-ag-sag-card-metric': 'quota' });
-        const qTrack = mk('div', 'ag-sag-quota-bar');
-        const qFill = mk('span', 'ag-sag-quota-bar-fill', undefined, { 'data-tone': QUOTA_TONE_MAP[lastState.quota.health] || 'ok' });
-        if (qFill.style) qFill.style.width = `${Math.max(0, Math.min(100, qPct))}%`;
-        qTrack.appendChild(qFill);
-        qCell.appendChild(mk('span', 'ag-sg-card-mk', strings.cardQuotaLabel || '5h quota'));
-        qCell.appendChild(mk('span', 'ag-sg-card-mv', `${qPct}% · ${turns5h}/${soft5h}`));
-        qCell.appendChild(qTrack);
-        grid.appendChild(qCell);
-      }
-
-      if (mods.promptQueue && lastState.queue) {
-        const qCnt = Number(lastState.queue.itemCount) || 0;
-        appendMetric(
-          grid,
-          strings.cardQueueLabel || 'Queued',
-          i18n.formatTemplate(strings.cardCountVal || '{n}', { n: qCnt }),
-          'queue'
-        );
-      }
-
-      const novInfo = buildNovInput(cfg);
-      if (novInfo.connected) {
-        appendMetric(grid, 'agy-NOV', `${novInfo.enabledCount}/${novInfo.total}`, 'nov');
-      }
-
-      if (grid.children.length > 0) cardEl.appendChild(grid);
-
+      let telNode = null;
       const tel = snap?.telemetry || lastState.telemetry || null;
       if (tel && typeof tel === 'object' && [tel.active5hSessions, tel.active5hSteps, tel.active7dSteps].some((n) => Number.isFinite(Number(n)))) {
         const num = (v) => Math.max(0, Math.round(Number(v) || 0));
-        const telRow = doc.createElement('div');
-        telRow.className = 'ag-sag-telemetry-row';
-        telRow.setAttribute('data-testid', 'ag-sag-telemetry-row');
-        if (telRow.style) Object.assign(telRow.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '5px 10px', fontSize: '11px', borderTop: '1px solid var(--border,rgba(148,163,184,0.18))', color: 'var(--muted-foreground,#94a3b8)', fontVariantNumeric: 'tabular-nums' });
-        const l = doc.createElement('span');
-        l.textContent = `5h ${num(tel.active5hSessions)} sess · ${num(tel.active5hSteps)} steps`;
-        const r = doc.createElement('span');
-        r.textContent = `7d ${num(tel.active7dSteps)} steps`;
-        telRow.appendChild(l);
-        telRow.appendChild(r);
-        cardEl.appendChild(telRow);
+        const telRow = mk('div', 'ag-sag-telemetry-row', undefined, { 'data-testid': 'ag-sag-telemetry-row' });
+        telRow.appendChild(mk('span', undefined, `5h · ${num(tel.active5hSessions)} sess / ${num(tel.active5hSteps)} steps`));
+        telRow.appendChild(mk('span', undefined, `7d · ${num(tel.active7dSteps)} steps`));
+        telNode = telRow;
       }
 
+      if (lensNode || telNode) {
+        const details = mk('details', 'ag-sag-card-details');
+        details.appendChild(mk('summary', 'ag-sag-card-details-sum', sagStr.cardDetailsSummary || 'Breakdown & details'));
+        const inner = mk('div', 'ag-sag-card-details-body');
+        if (lensNode) inner.appendChild(lensNode);
+        if (telNode) inner.appendChild(telNode);
+        details.appendChild(inner);
+        cardEl.appendChild(details);
+      }
+
+      // 5. Crisp single-row footer with concise, natural labels
       const foot = mk('div', 'ag-sg-card-foot');
       const addAct = (cls, text, act, fn, title) => {
         const b = mkBtn(cls, text, { 'data-ag-sg-card-act': act }, () => { close(); fn(); });
         if (title) b.title = title;
         foot.appendChild(b);
       };
-      if (typeof options.onCompactNow === 'function') addAct('ag-sg-btn', strings.btnCompactNow, 'compact-now', options.onCompactNow);
-      if (typeof options.onCleanRestart === 'function') addAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clean-restart', () => options.onCleanRestart({ mode: 'keep' }), strings.clearKeepTip);
-      if (mods.precompactExport !== false && typeof options.onExportSession === 'function') addAct('ag-sg-btn', sagStr.cardExportMdBtn || 'Export MD', 'export-md', options.onExportSession);
-      if (typeof options.onOpenShortcuts === 'function') addAct('ag-sg-btn', '⌨', 'open-shortcuts', options.onOpenShortcuts, sagStr.shortcutsTitle || 'Shortcuts');
-      if (typeof options.onOpenSettings === 'function' && strings.cardOpenSettingsBtn) addAct('ag-sg-btn', strings.cardOpenSettingsBtn, 'open-settings', () => options.onOpenSettings('overview'));
+      if (typeof options.onCompactNow === 'function') addAct('ag-sg-btn', sagStr.cardBtnCompact || strings.btnCompactNow, 'compact-now', options.onCompactNow);
+      if (typeof options.onCleanRestart === 'function') addAct('ag-sg-btn ag-sg-btn-primary', sagStr.cardBtnRestart || strings.btnClearKeep, 'clean-restart', () => options.onCleanRestart({ mode: 'keep' }), strings.clearKeepTip);
+      if (mods.precompactExport !== false && typeof options.onExportSession === 'function') addAct('ag-sg-btn', sagStr.cardExportMdBtn || 'Export', 'export-md', options.onExportSession);
+      if (typeof options.onOpenSettings === 'function') addAct('ag-sg-btn', sagStr.cardBtnSettings || 'Settings', 'open-settings', () => options.onOpenSettings('overview'));
       if (foot.children.length > 0) cardEl.appendChild(foot);
     }
 
