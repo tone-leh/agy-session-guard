@@ -4,6 +4,11 @@ All notable changes to **agy-Sag** *(formerly Antigravity Session Guard / 领航
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-28
+
+### Fixed
+- **Cross-Platform LaunchAgent Plist Path Normalization (`cli/launcher.mjs`)**: `buildLaunchAgentPlist()` now preserves POSIX absolute paths (`/Users/...`) via `path.posix.resolve()` on Windows hosts instead of rewriting them with a Windows drive letter and backslashes, and defaults macOS LaunchAgent logs to `~/Library/Logs/agy-sag` outside `~/.gemini/antigravity/`.
+
 ## [1.5.0] - 2026-11-28
 
 ### Added & Upgraded — Systematic Obsidian Prism Parity & Beyond (Zero React Fiber Intrusion)

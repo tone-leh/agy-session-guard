@@ -330,7 +330,7 @@ test('1. agy-NOV v1.2 feed parity: unwraps snap.summary, supports verify=blocked
 test('2. Marketplace compliance check passes on repo and flags bad description/unknown field', () => {
   const realRes = inspectMarketplaceCompliance(REPO_ROOT);
   assert.equal(realRes.ok, true, `Expected repo plugin.json compliance pass, got: ${realRes.issues.join('; ')}`);
-  assert.equal(realRes.version, '1.5.0');
+  assert.equal(realRes.version, '1.5.1');
 
   withTempDir((tmp) => {
     fs.writeFileSync(

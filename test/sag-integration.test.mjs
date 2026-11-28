@@ -328,7 +328,7 @@ test('1. mountSag / mountSessionGuard mounts both __agSag & __agSessionGuard wit
 
   try {
     assert.equal(api.brand, 'agy-Sag');
-    assert.equal(api.version, '1.5.0');
+    assert.equal(api.version, '1.5.1');
     assert.equal(win.__agSag, api);
     assert.equal(win.__agSessionGuard, api);
 

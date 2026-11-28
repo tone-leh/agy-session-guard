@@ -1636,18 +1636,29 @@ function escapeXmlEntity(raw) {
     .replace(/'/g, '&apos;');
 }
 
+function normalizeLaunchAgentPath(raw, fallback = '') {
+  const s = String(raw || fallback || '').trim();
+  if (!s) return '';
+  if (s.startsWith('/')) return path.posix.resolve(s);
+  return path.resolve(s);
+}
+
 export function buildLaunchAgentPlist({
   nodePath = process.execPath,
   cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'sag-cli.mjs'),
   label = 'local.agy-sag-keepalive',
-  logDir = path.join(os.homedir(), '.gemini', 'antigravity', 'agy-sag', 'logs'),
+  logDir = path.join(os.homedir(), 'Library', 'Logs', 'agy-sag'),
 } = {}) {
   const safeLabel = escapeXmlEntity(String(label || 'local.agy-sag-keepalive').trim() || 'local.agy-sag-keepalive');
-  const safeNode = escapeXmlEntity(path.resolve(String(nodePath || process.execPath)));
-  const safeCli = escapeXmlEntity(path.resolve(String(cliPath || '')));
-  const resolvedLogDir = path.resolve(String(logDir || path.join(os.homedir(), '.gemini', 'antigravity', 'agy-sag', 'logs')));
-  const safeOutLog = escapeXmlEntity(path.join(resolvedLogDir, 'keepalive.out.log'));
-  const safeErrLog = escapeXmlEntity(path.join(resolvedLogDir, 'keepalive.err.log'));
+  const safeNode = escapeXmlEntity(normalizeLaunchAgentPath(nodePath, process.execPath));
+  const safeCli = escapeXmlEntity(normalizeLaunchAgentPath(cliPath, ''));
+  const resolvedLogDir = normalizeLaunchAgentPath(
+    logDir,
+    path.join(os.homedir(), 'Library', 'Logs', 'agy-sag')
+  );
+  const joinLog = resolvedLogDir.startsWith('/') ? path.posix.join : path.join;
+  const safeOutLog = escapeXmlEntity(joinLog(resolvedLogDir, 'keepalive.out.log'));
+  const safeErrLog = escapeXmlEntity(joinLog(resolvedLogDir, 'keepalive.err.log'));
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',

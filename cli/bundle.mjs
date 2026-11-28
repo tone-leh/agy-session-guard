@@ -1309,6 +1309,6 @@ export function buildInjectExpression(config = null, opts = {}) {
     ...(bootCfg ? { config: bootCfg } : {}),
   });
   if (api) api.__agSgHash = targetHash;
-  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.5.0' };
+  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.5.1' };
 })()`;
 }

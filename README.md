@@ -6,7 +6,7 @@
 
 Live **10-language native UI translation** (~5,400 entries per locale), unified **6-Tab Control Hub & Global Drawer (`Ctrl/Cmd+Alt+,`)**, **segmented status capsule HUD**, **Prompt Library & Command Palette (`Ctrl/Cmd+Alt+P`)**, configurable auto `/compact` guard with viewport scroll shield, streaming **Prompt Queue**, crash-proof **Draft Vault**, turn bookmarks & cross-session archive, **policy-gated Auto-Accept** with a non-bypassable hard deny blacklist, zero-`:has()` **Optical Theme Studio**, read-only **Quota Pulse**, and offline **Storage Doctor** — **pick only the modules you want**.
 
-> **Version:** `v1.5.0` · **License:** [MIT](./LICENSE) · **Runtime:** Node.js >= 22 · **Dependencies:** Zero runtime npm deps · **Architecture:** Zero-ASAR CDP (Lossless) · **Companion:** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
+> **Version:** `v1.5.1` · **License:** [MIT](./LICENSE) · **Runtime:** Node.js >= 22 · **Dependencies:** Zero runtime npm deps · **Architecture:** Zero-ASAR CDP (Lossless) · **Companion:** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
 > **Non-Affiliation Disclaimer:** `agy-Sag` is an independent open-source community project and is not affiliated with, sponsored by, or endorsed by Google LLC. References to "Antigravity" and "Google" are used solely to describe software compatibility.
 
