@@ -511,21 +511,6 @@
       brandBadge.appendChild(brandTxt);
       foldLeft.appendChild(brandBadge);
 
-      const countPill = doc.createElement('span');
-      countPill.className = 'ag-sag-meta-pill';
-      countPill.setAttribute('data-testid', 'ag-sag-mod-count');
-      countPill.textContent = i18n.formatTemplate(t('foldOnCount', '{on}/{total} ON'), {
-        on: enabledModuleCount,
-        total: totalModuleCount,
-      });
-      foldLeft.appendChild(countPill);
-
-      const langPill = doc.createElement('span');
-      langPill.className = 'ag-sag-meta-pill';
-      langPill.setAttribute('data-testid', 'ag-sag-lang-badge');
-      langPill.textContent = cfg.hostI18nLocale || 'auto';
-      foldLeft.appendChild(langPill);
-
       const foldRight = doc.createElement('div');
       foldRight.className = 'ag-sag-fold-right';
 
@@ -650,12 +635,13 @@
           cfg.modules?.quotaPulse
       );
 
+      const showNovTab = Boolean(novConnected || ctx.novState?.installed);
       const tabSpecs = [
         ['overview', t('tabOverview', 'Overview'), false],
         ['ui', t('tabUi', 'UI'), uiHasOn],
         ['conversation', t('tabConversation', 'Chat'), convHasOn],
         ['guard', t('tabGuard', 'Guard'), guardHasOn],
-        ['nov', t('tabNov', 'agy-NOV'), novConnected],
+        ...(showNovTab ? [['nov', t('tabNov', 'agy-NOV'), novConnected]] : []),
         ['advanced', t('tabAdvanced', 'Advanced'), false],
       ];
 
@@ -754,15 +740,17 @@
       renderPresetRow(presetAndTabsWrap, ctx);
       renderTabBar(presetAndTabsWrap, ctx, section);
 
+      const showNovTab = Boolean(ctx.novConnected || ctx.novState?.installed);
+      const effectiveTab = activeSubTab === 'nov' && !showNovTab ? 'overview' : activeSubTab;
       const pane = doc.createElement('div');
       pane.className = 'ag-sag-pane';
-      pane.setAttribute('data-ag-sag-pane', activeSubTab);
-      if (activeSubTab === 'overview') renderOverview(pane, ctx);
-      else if (activeSubTab === 'ui') renderUiTab(pane, ctx);
-      else if (activeSubTab === 'conversation') renderConversationTab(pane, ctx);
-      else if (activeSubTab === 'guard') renderGuardTab(pane, ctx);
-      else if (activeSubTab === 'nov') renderNovTab(pane, ctx);
-      else if (activeSubTab === 'advanced') renderAdvancedTab(pane, ctx);
+      pane.setAttribute('data-ag-sag-pane', effectiveTab);
+      if (effectiveTab === 'overview') renderOverview(pane, ctx);
+      else if (effectiveTab === 'ui') renderUiTab(pane, ctx);
+      else if (effectiveTab === 'conversation') renderConversationTab(pane, ctx);
+      else if (effectiveTab === 'guard') renderGuardTab(pane, ctx);
+      else if (effectiveTab === 'nov') renderNovTab(pane, ctx);
+      else if (effectiveTab === 'advanced') renderAdvancedTab(pane, ctx);
       presetAndTabsWrap.appendChild(pane);
 
       const searchResultsHost = doc.createElement('div');
@@ -787,7 +775,7 @@
         renderUiTab(virtualAll, searchCtx);
         renderConversationTab(virtualAll, searchCtx);
         renderGuardTab(virtualAll, searchCtx);
-        renderNovTab(virtualAll, searchCtx);
+        if (showNovTab) renderNovTab(virtualAll, searchCtx);
         renderAdvancedTab(virtualAll, searchCtx);
 
         const matches = Array.from(virtualAll.querySelectorAll?.('[data-ag-sag-search]') || []).filter((el) =>
@@ -1004,9 +992,18 @@
 
     function ensureNativeSettingsNavAnchor(sectionEl) {
       if (!doc || !sectionEl || destroyed) return;
+      try {
+        sectionEl.querySelectorAll?.('[data-testid="ag-sag-settings-nav-item"]')?.forEach?.((n) => safeRemove(n));
+      } catch {}
       const dialog = sectionEl.closest?.('[role="dialog"]') || doc.querySelector?.('[role="dialog"]') || null;
       if (!dialog) return;
-      const navHost = dialog.querySelector?.('nav, [role="tablist"], aside') || null;
+      const navCandidates =
+        typeof dialog.querySelectorAll === 'function'
+          ? Array.from(dialog.querySelectorAll('nav, aside') || [])
+          : [dialog.querySelector?.('nav, aside')].filter(Boolean);
+      const navHost =
+        navCandidates.find((el) => el && !isNodeInside(sectionEl, el) && !el.closest?.('[data-ag-sag-owned="1"], .ag-sag-suite-panel')) ||
+        null;
       if (!navHost) return;
       let navBtn = navHost.querySelector?.('[data-testid="ag-sag-settings-nav-item"]') || null;
       if (!navBtn) {

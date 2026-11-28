@@ -51,7 +51,7 @@
       ['auto-silent', t('cfgModeSilent', 'Silent Auto')],
       ['confirm', t('cfgModeConfirm', 'Confirm Bar')],
       ['fill-only', t('cfgModeFill', 'Fill Only')],
-      ['auto-countdown', 'Countdown'],
+      ['auto-countdown', t('cfgModeCountdown', 'Auto (3s)')],
     ]) {
       const b = mkChip({
         label: mLbl,
@@ -131,13 +131,13 @@
     const pqState = typeof options.getQueueState === 'function' ? options.getQueueState() : null;
     const pqBadge = doc.createElement('span');
     pqBadge.className = 'ag-sag-badge-note';
-    pqBadge.textContent = `${pqState?.itemCount ?? 0} queued`;
+    pqBadge.textContent = i18n.formatTemplate(t('cardChipQueue', '{n} queued'), { n: pqState?.itemCount ?? 0 });
     pane.appendChild(mkSuiteRow(t('convQueueLabel', 'Prompt Queue'), t('convQueueDesc', ''), pqBadge, { searchExtra: 'promptQueue' }));
 
     const dgState = typeof options.getDraftState === 'function' ? options.getDraftState() : null;
     const dgBadge = doc.createElement('span');
     dgBadge.className = 'ag-sag-badge-note';
-    dgBadge.textContent = `${dgState?.savedDraftCount ?? 0} drafts`;
+    dgBadge.textContent = i18n.formatTemplate(t('convDraftCount', '{n} drafts'), { n: dgState?.savedDraftCount ?? 0 });
     pane.appendChild(mkSuiteRow(t('cfgModDraftGuard', 'Draft Guard'), t('convDraftDesc', ''), dgBadge, { searchExtra: 'draftGuard' }));
 
     // 6. Prompt Library management (<details>)

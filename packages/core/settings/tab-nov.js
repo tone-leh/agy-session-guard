@@ -68,12 +68,19 @@
       const bMeta = doc.createElement('span');
       bMeta.className = 'ag-sag-nov-meta';
       bMeta.setAttribute('data-testid', 'ag-sag-nov-meta');
-      bMeta.textContent = i18n.formatTemplate(t('novConnectedMeta', 'v{ver} · {preset} · {on}/{total} · {tools} tools'), {
+      const rawPresetId = novState.config?.preset || 'core';
+      const matchedPreset = novPresetsMeta.find((p) => p && p.id === rawPresetId);
+      const presetLabel =
+        rawPresetId === 'custom'
+          ? t('presetCustomTag', 'Custom')
+          : matchedPreset
+            ? isZh
+              ? matchedPreset.nameZh
+              : matchedPreset.nameEn
+            : rawPresetId;
+      bMeta.textContent = i18n.formatTemplate(t('novConnectedMeta', 'v{ver} · {preset}'), {
         ver: novState.version || '0.5.0',
-        preset: novState.config?.preset || 'core',
-        on: novState.enabledCount ?? 0,
-        total: novModulesMeta.length || 13,
-        tools: novState.toolCount ?? 2,
+        preset: presetLabel,
       });
       bLeft.appendChild(bTitle);
       bLeft.appendChild(bMeta);
@@ -153,7 +160,7 @@
           privTag.className = 'ag-sag-nov-tag';
           if (m.privacy === 'opt-in-network') {
             privTag.setAttribute('data-kind', 'network');
-            privTag.textContent = t('novPrivacyNetwork', 'Opt-in Net');
+            privTag.textContent = t('novPrivacyNetwork', 'On-Demand');
           } else {
             privTag.textContent = t('novPrivacyOffline', 'Offline');
           }
@@ -247,41 +254,40 @@
       synBox.appendChild(synList);
       pane.appendChild(synBox);
 
-      // Dual-Star Live Read-Only Feed (guard / radar / mem / spec / verify)
+      // Live NOV Status Feed
       const feed = typeof novSynergy?.getFeed === 'function' ? novSynergy.getFeed() : null;
       if (feed) {
         const parts = [];
         if (feed.guard?.blockedCount > 0 || feed.guard?.forceAskCount > 0 || feed.guard?.snapshotCount > 0 || feed.guard?.permissionMode) {
-          const modeTag = feed.guard.permissionMode ? ` [${feed.guard.permissionMode}]` : '';
-          const faTag = feed.guard.forceAskCount > 0 ? (isZh ? ` · 强确认 ${feed.guard.forceAskCount}` : ` · force_ask ${feed.guard.forceAskCount}`) : '';
+          const faTag = feed.guard.forceAskCount > 0 ? (isZh ? ` · 待确认 ${feed.guard.forceAskCount}` : ` · confirm ${feed.guard.forceAskCount}`) : '';
           parts.push(
             isZh
-              ? `Guard${modeTag} 拦截 ${feed.guard.blockedCount}${faTag} · 快照 ${feed.guard.snapshotCount}`
-              : `Guard${modeTag} blocked ${feed.guard.blockedCount}${faTag} · snapshots ${feed.guard.snapshotCount}`
+              ? `安全护盾 拦截 ${feed.guard.blockedCount}${faTag} · 快照 ${feed.guard.snapshotCount}`
+              : `Guard blocked ${feed.guard.blockedCount}${faTag} · snapshots ${feed.guard.snapshotCount}`
           );
         }
         if (feed.spec?.writeLockActive) {
-          parts.push(isZh ? `Spec 写锁激活（队列已暂停）` : `Spec write-lock active (queue paused)`);
+          parts.push(isZh ? `规划写锁开启（排队已暂停）` : `Spec write-lock active (queue paused)`);
         }
         if (feed.verify?.lastStatus === 'blocked') {
-          parts.push(isZh ? `Verify 门禁阻断` : `Verify gate blocked`);
+          parts.push(isZh ? `校验门已拦截` : `Verify gate blocked`);
         } else if (feed.verify?.lastStatus === 'fail') {
-          parts.push(isZh ? `Verify 门禁未通过` : `Verify gate failed`);
+          parts.push(isZh ? `校验未通过` : `Verify gate failed`);
         }
         if (feed.healthSweep && typeof feed.healthSweep.score === 'number') {
           parts.push(isZh ? `健康分 ${feed.healthSweep.score}` : `Health ${feed.healthSweep.score}`);
         }
         if (feed.mem?.driftedCount > 0) {
-          parts.push(isZh ? `记忆漂移 ${feed.mem.driftedCount}` : `Memory drift ${feed.mem.driftedCount}`);
+          parts.push(isZh ? `记忆待核对 ${feed.mem.driftedCount}` : `Memory drift ${feed.mem.driftedCount}`);
         }
         if (feed.radar?.awaitingCount > 0) {
-          parts.push(isZh ? `Radar 待批 ${feed.radar.awaitingCount}` : `Radar awaiting ${feed.radar.awaitingCount}`);
+          parts.push(isZh ? `后台待确认 ${feed.radar.awaitingCount}` : `Awaiting ${feed.radar.awaitingCount}`);
         }
         if (parts.length > 0) {
           const feedEl = doc.createElement('div');
           feedEl.className = 'ag-sag-badge-note';
           feedEl.setAttribute('data-testid', 'ag-sag-nov-live-feed');
-          feedEl.textContent = `${isZh ? '实时双星信号：' : 'Live NOV Feed: '}${parts.join(' · ')}`;
+          feedEl.textContent = `${isZh ? '联动动态：' : 'Live NOV Status: '}${parts.join(' · ')}`;
           pane.appendChild(feedEl);
         }
       }
@@ -309,60 +315,6 @@
         );
       }
       pane.appendChild(waitCard);
-    } else {
-      const promo = doc.createElement('div');
-      promo.className = 'ag-sag-nov-promo';
-      promo.setAttribute('data-testid', 'ag-sag-nov-promo');
-      const pt = doc.createElement('div');
-      pt.className = 'ag-sag-nov-promo-title';
-      pt.textContent = t('novPromoTitle', 'Pair with agy-NOV');
-      const pd = doc.createElement('div');
-      pd.className = 'ag-sag-nov-promo-desc';
-      pd.textContent = t('novPromoDesc', '');
-      const featRow = doc.createElement('div');
-      featRow.className = 'ag-sag-ext-grid';
-      for (const lbl of [t('novPromoBadge1', ''), t('novPromoBadge2', ''), t('novPromoBadge3', ''), t('novPromoBadge4', '')].filter(Boolean)) {
-        const tag = doc.createElement('span');
-        tag.className = 'ag-sag-meta-pill';
-        tag.textContent = lbl;
-        featRow.appendChild(tag);
-      }
-      const cmdRow = doc.createElement('div');
-      cmdRow.className = 'ag-sag-nov-cmd-row';
-      const cmdCode = doc.createElement('code');
-      cmdCode.className = 'ag-sag-nov-cmd-code';
-      cmdCode.setAttribute('data-testid', 'ag-sag-nov-install-cmd');
-      cmdCode.textContent = installCmd;
-      const copyBtn = doc.createElement('button');
-      copyBtn.type = 'button';
-      copyBtn.className = 'ag-sag-synergy-act';
-      copyBtn.setAttribute('data-ag-nov-copy-install', '1');
-      copyBtn.textContent = uiState.copiedInstallFeedback ? t('novPromoCopiedBtn', 'Copied') : t('novPromoCopyBtn', 'Copy');
-      copyBtn.addEventListener('click', (ev) => {
-        ev?.preventDefault?.();
-        ev?.stopPropagation?.();
-        try {
-          if (typeof options.onCopyText === 'function') options.onCopyText(installCmd);
-          else if (win?.navigator?.clipboard?.writeText) void win.navigator.clipboard.writeText(installCmd).catch(() => {});
-        } catch {}
-        uiState.copiedInstallFeedback = true;
-        refreshAllViews();
-        if (uiState.copyResetTimer) clearTimeout(uiState.copyResetTimer);
-        uiState.copyResetTimer = setTimeout(() => {
-          uiState.copyResetTimer = null;
-          if (isDestroyed()) return;
-          uiState.copiedInstallFeedback = false;
-          refreshAllViews();
-        }, 1800);
-        uiState.copyResetTimer?.unref?.();
-      });
-      cmdRow.appendChild(cmdCode);
-      cmdRow.appendChild(copyBtn);
-      promo.appendChild(pt);
-      promo.appendChild(pd);
-      promo.appendChild(featRow);
-      promo.appendChild(cmdRow);
-      pane.appendChild(promo);
     }
   }
 

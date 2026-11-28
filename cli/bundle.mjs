@@ -512,11 +512,12 @@ export function readExtendedPackFile(locale, repoRoot = path.resolve(__dirname, 
 }
 
 const FREE_SYMBOL_RANGES = [
-  [0x0100, 0x02af], // 2-byte UTF-8 (Latin Extended-A/B + IPA Extensions, 432 slots)
+  [0x00a1, 0x00ff], // 2-byte UTF-8 (Latin-1 Supplement, 95 slots)
+  [0x0100, 0x02ff], // 2-byte UTF-8 (Latin Extended-A/B + Spacing Modifiers, 512 slots)
   [0x0370, 0x03ff], // 2-byte UTF-8 (Greek/Coptic, 144 slots)
-  [0x0500, 0x052f], // 2-byte UTF-8 (Cyrillic Supplement, 48 slots)
-  [0x0531, 0x0556], // 2-byte UTF-8 (Armenian uppercase, 38 slots)
-  [0x0561, 0x0587], // 2-byte UTF-8 (Armenian lowercase, 39 slots)
+  [0x0400, 0x04ff], // 2-byte UTF-8 (Cyrillic, 256 slots; auto-skips chars present in rawText)
+  [0x0500, 0x058f], // 2-byte UTF-8 (Cyrillic Supp + Armenian, 144 slots)
+  [0x0590, 0x07bf], // 2-byte UTF-8 (Hebrew/Arabic/Syriac/Thaana, 560 slots)
   [0xe000, 0xf8ff], // 3-byte UTF-8 fallback (BMP Private Use Area)
 ];
 
@@ -613,10 +614,10 @@ function encodeDictLiteral(dict) {
   return Buffer.byteLength(splitSrc, 'utf8') < Buffer.byteLength(arrSrc, 'utf8') ? splitSrc : arrSrc;
 }
 
-function collectBpeNgramCandidates(text, { minOccurrences = 3, maxCount = 320, symBytes = 2, skipToken = null } = {}) {
+function collectBpeNgramCandidates(text, { minOccurrences = 3, maxCount = 420, symBytes = 2, skipToken = null } = {}) {
   const freq = new Map();
   const len = text.length;
-  for (let n = 4; n >= 2; n -= 1) {
+  for (let n = 6; n >= 2; n -= 1) {
     const step = len > 120000 ? 2 : 1;
     for (let i = 0; i <= len - n; i += step) {
       const tok = text.slice(i, i + n);
@@ -668,7 +669,7 @@ function compressWithFreeSymbols(rawText, candidates, { minOccurrences = 2, entr
 
   // Optional BPE-style second pass over already-compressed text (zero extra decoder overhead)
   for (let pass = 0; pass < bpePasses; pass += 1) {
-    const extra = collectBpeNgramCandidates(packed, { minOccurrences: 3, maxCount: 280, skipToken: skipBpeToken });
+    const extra = collectBpeNgramCandidates(packed, { minOccurrences: 3, maxCount: 420, skipToken: skipBpeToken });
     if (!extra.length) break;
     const prevLen = dict.length;
     applyList(extra, 3);
@@ -879,7 +880,7 @@ function packStringArrayConst(code, constName, { allow2D = true } = {}) {
     { minGain: 8, maxCount: 600 }
   );
 
-  const compressed = compressWithFreeSymbols(flat, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 3 });
+  const compressed = compressWithFreeSymbols(flat, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 5 });
   let replacement;
   if (compressed) {
     const dictSrc = encodeDictLiteral(compressed.d);
@@ -946,7 +947,7 @@ function packStaticJsonConst(code, constName, obj) {
     { minGain: 6, maxCount: 640 }
   );
 
-  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 3 });
+  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 5 });
   if (!compressed) return code;
 
   const dictSrc = encodeDictLiteral(compressed.d);
@@ -998,7 +999,7 @@ function packStaticCssConstInCode(code, constName, { useDict = false, runtimeCss
       minOccurrences: 2,
       entryOverhead: 3,
       bpePasses: 3,
-      skipBpeToken: (tok) => /[+()%01]/.test(tok) || /calc/i.test(tok),
+      skipBpeToken: (tok) => /[+()%01]|cal|alc|px/i.test(tok),
     });
     if (compressed) {
       const dictSrc = encodeDictLiteral(compressed.d);
@@ -1309,6 +1310,6 @@ export function buildInjectExpression(config = null, opts = {}) {
     ...(bootCfg ? { config: bootCfg } : {}),
   });
   if (api) api.__agSgHash = targetHash;
-  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.5.1' };
+  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.6.0' };
 })()`;
 }

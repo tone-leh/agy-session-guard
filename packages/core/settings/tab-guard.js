@@ -218,19 +218,21 @@
     aaAdv.appendChild(mkSuiteRow(t('guardAutoAcceptCustomLabel', 'Custom Allow Regex'), '', aaWrap, { stacked: true, searchExtra: 'autoAcceptCustomPatterns' }));
     pane.appendChild(aaAdv);
 
-    // 4. Quota Pulse summary + <details> soft turn thresholds
+    // 4. Quota Pulse summary + <details> soft thresholds
     const qCtrl = doc.createElement('div');
     qCtrl.className = 'ag-sag-ext-grid';
-    if (typeof options.getQuotaSummary === 'function') {
+    if (typeof options.getQuotaSummary === 'function' && cfg.modules?.quotaPulse) {
       const qs = options.getQuotaSummary();
       const badge = doc.createElement('span');
       badge.className = 'ag-sag-badge-note';
       badge.setAttribute('data-testid', 'ag-sag-quota-summary');
-      badge.textContent = i18n.formatTemplate(t('quotaSummary', '5h: {t5} · 7d: {t7} · {health}'), {
-        t5: qs?.localEstimate?.turns5h ?? 0,
-        t7: qs?.localEstimate?.turns7d ?? 0,
-        health: qs?.health || 'ok',
-      });
+      const h = qs?.health || 'ok';
+      badge.textContent =
+        h === 'danger' || h === 'rate-limited'
+          ? t('cardQuotaLow', 'Low Quota')
+          : h === 'warn'
+            ? t('cardQuotaTight', 'Running Low')
+            : t('cardQuotaHealthy', 'Healthy');
       qCtrl.appendChild(badge);
     }
     pane.appendChild(

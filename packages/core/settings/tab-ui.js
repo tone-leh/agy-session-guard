@@ -24,6 +24,12 @@
       resolveDep,
       downloadJsonPayload,
       getMountedRoots,
+      novState,
+      novConnected,
+      novSynergy,
+      novSynergyMod,
+      refreshAllViews,
+      isDestroyed,
       uiState,
     } = ctx;
 
@@ -78,6 +84,7 @@
 
     // 2. One-Click Visual Atmosphere Looks (8 curated combinations) + Auto Dark/Light Pairing
     const themeStudioMod = resolveDep('__agSagThemeStudio', './theme-studio.js');
+    const themePresetMap = themeStudioMod?.THEME_PRESETS || {};
     const themeOn = Boolean(cfg.modules?.themeStudio);
     const hostScheme = themeStudioMod?.detectHostColorScheme ? themeStudioMod.detectHostColorScheme(doc, win) : 'dark';
     const resolvedSpec = themeStudioMod?.resolveEffectivePreset
@@ -92,7 +99,7 @@
       ['matcha-note', t('lookMatchaNote', 'Matcha Journal'), ['#f6f8f3', '#437352']],
       ['phantom-pop', t('lookPhantomPop', 'Phantom Pop'), ['#101014', '#e11d48']],
       ['doodle-ink', t('lookDoodleInk', 'Doodle Ink'), ['#fdfcf7', '#d43544']],
-      ['pixel-geek', t('lookPixelGeek', 'Pixel Geek'), ['#0e1117', '#38f28b']],
+      ['pixel-geek', t('lookPixelGeek', 'Pixel Terminal'), ['#0e1117', '#38f28b']],
       ['aurora-liquid', t('lookAuroraLiquid', 'Aurora Liquid'), ['#0b1120', '#70d6ff']],
     ];
     for (const [lid, lLbl, dots] of lookDefs) {
@@ -117,10 +124,15 @@
       btn.appendChild(lbl);
       btn.addEventListener('click', () => {
         if (!patch) return;
-        updateConfig({
+        const spec = themePresetMap[patch.themePreset];
+        const nextPatch = {
           ...patch,
           modules: { ...cfg.modules, themeStudio: true },
-        });
+        };
+        if (spec?.colorScheme && spec.colorScheme !== hostScheme && cfg.themeAutoPair) {
+          nextPatch.themeAutoPair = false;
+        }
+        updateConfig(nextPatch);
       });
       lookRow.appendChild(btn);
     }
@@ -165,7 +177,6 @@
       'pixel-terminal': t('themePixelTerminal', 'Pixel Terminal'),
       'aurora-glass': t('themeAuroraGlass', 'Aurora Glass'),
     };
-    const themePresetMap = themeStudioMod?.THEME_PRESETS || {};
 
     const galleryBar = doc.createElement('div');
     galleryBar.className = 'ag-sag-gallery-bar';
@@ -895,7 +906,7 @@
     thDetails.setAttribute('data-testid', 'ag-sag-adv-thought');
     if (cfg.modules?.thoughtTranslate || uiState.thoughtStatusText) thDetails.open = true;
     const thSum = doc.createElement('summary');
-    thSum.textContent = t('thoughtAdvSummary', 'Thought & Sidebar Title Translation (Opt-In)');
+    thSum.textContent = t('thoughtAdvSummary', 'Thought & Sidebar Title Translation');
     thDetails.appendChild(thSum);
 
     const thBody = doc.createElement('div');
@@ -910,7 +921,7 @@
     const engGrid = doc.createElement('div');
     engGrid.className = 'ag-sag-ext-grid';
     for (const [eid, eLbl] of [
-      ['mt', t('thoughtEngineMt', 'Machine Translate (Keyless)')],
+      ['mt', t('thoughtEngineMt', 'Machine Translate')],
       ['openai', t('thoughtEngineOpenai', 'OpenAI-Compatible')],
       ['anthropic', t('thoughtEngineAnthropic', 'Anthropic')],
       ['gemini', t('thoughtEngineGemini', 'Gemini')],
@@ -979,7 +990,7 @@
       })
     );
 
-    // Provider endpoint / model / 0600 isolated API key form (sent strictly via Node sidecar)
+    // Provider endpoint / model / API key form (hidden for Machine Translate; API key hidden for local Ollama)
     const provWrap = doc.createElement('div');
     provWrap.className = 'ag-sag-pack-ctrl';
     const cachedProv = uiState.thoughtProviderStatus?.providers?.[curEngine] || null;
@@ -995,50 +1006,47 @@
         .catch(() => {});
     }
 
-    const baseInp = doc.createElement('input');
-    baseInp.type = 'text';
-    baseInp.className = 'ag-sag-search-input';
-    baseInp.setAttribute('data-testid', 'ag-sag-thought-baseurl');
-    baseInp.placeholder = t('thoughtBaseUrlPh', 'Custom Base URL / Endpoint');
-    baseInp.value =
-      uiState.thoughtDraftBaseUrl?.[curEngine] !== undefined
-        ? uiState.thoughtDraftBaseUrl[curEngine]
-        : curEngine === 'mt'
-          ? cachedProv?.endpoint || ''
-          : cachedProv?.baseUrl || '';
-    baseInp.addEventListener('input', () => {
-      if (!uiState.thoughtDraftBaseUrl) uiState.thoughtDraftBaseUrl = {};
-      uiState.thoughtDraftBaseUrl[curEngine] = baseInp.value;
-    });
-    provWrap.appendChild(baseInp);
-
+    const isMt = curEngine === 'mt';
+    const isOllama = curEngine === 'ollama';
+    let baseInp = null;
     let modelInp = null;
     let keyInp = null;
-    if (curEngine !== 'mt') {
+    if (!isMt) {
+      baseInp = doc.createElement('input');
+      baseInp.type = 'text';
+      baseInp.className = 'ag-sag-search-input';
+      baseInp.setAttribute('data-testid', 'ag-sag-thought-baseurl');
+      baseInp.placeholder = isOllama ? 'http://127.0.0.1:11434/v1' : t('thoughtBaseUrlPh', 'Custom Base URL / Endpoint');
+      baseInp.value = uiState.thoughtDraftBaseUrl?.[curEngine] ?? cachedProv?.baseUrl ?? '';
+      baseInp.addEventListener('input', () => {
+        if (!uiState.thoughtDraftBaseUrl) uiState.thoughtDraftBaseUrl = {};
+        uiState.thoughtDraftBaseUrl[curEngine] = baseInp.value;
+      });
+      provWrap.appendChild(baseInp);
+
       modelInp = doc.createElement('input');
       modelInp.type = 'text';
       modelInp.className = 'ag-sag-search-input';
       modelInp.setAttribute('data-testid', 'ag-sag-thought-model');
       modelInp.placeholder = t('thoughtModelPh', 'Model ID');
-      modelInp.value =
-        uiState.thoughtDraftModel?.[curEngine] !== undefined
-          ? uiState.thoughtDraftModel[curEngine]
-          : cachedProv?.model || '';
+      modelInp.value = uiState.thoughtDraftModel?.[curEngine] ?? cachedProv?.model ?? '';
       modelInp.addEventListener('input', () => {
         if (!uiState.thoughtDraftModel) uiState.thoughtDraftModel = {};
         uiState.thoughtDraftModel[curEngine] = modelInp.value;
       });
       provWrap.appendChild(modelInp);
 
-      keyInp = doc.createElement('input');
-      keyInp.type = 'password';
-      keyInp.className = 'ag-sag-search-input';
-      keyInp.setAttribute('data-testid', 'ag-sag-thought-apikey');
-      keyInp.placeholder = cachedProv?.hasKey
-        ? `${t('thoughtApiKeyPh', 'API Key')} (${cachedProv.maskedKey || 'stored'})`
-        : t('thoughtApiKeyPh', 'API Key');
-      keyInp.value = '';
-      provWrap.appendChild(keyInp);
+      if (!isOllama) {
+        keyInp = doc.createElement('input');
+        keyInp.type = 'password';
+        keyInp.className = 'ag-sag-search-input';
+        keyInp.setAttribute('data-testid', 'ag-sag-thought-apikey');
+        keyInp.placeholder = cachedProv?.hasKey
+          ? `${t('thoughtApiKeyPh', 'API Key')} (${cachedProv.maskedKey || t('thoughtKeyStored', 'saved')})`
+          : t('thoughtApiKeyPh', 'API Key');
+        keyInp.value = '';
+        provWrap.appendChild(keyInp);
+      }
     }
 
     const thStatusEl = doc.createElement('div');
@@ -1069,66 +1077,65 @@
 
     const provBtns = doc.createElement('div');
     provBtns.className = 'ag-sag-ext-grid';
-    provBtns.appendChild(
-      mkChip({
-        label: t('thoughtSaveBtn', 'Save Provider'),
-        active: true,
-        testId: 'ag-sag-thought-save-btn',
-        onClick: () => {
-          if (typeof options.onTranslatorSaveProvider !== 'function') {
-            setThStatus(t('thoughtOfflineErr', 'Watch Sidecar offline'), 'error');
-            return;
-          }
-          const req =
-            curEngine === 'mt'
-              ? { engine: 'mt', endpoint: baseInp.value.trim() }
-              : {
-                  engine: curEngine,
-                  baseUrl: baseInp.value.trim(),
-                  model: modelInp?.value?.trim() || '',
-                  ...(keyInp?.value?.trim() ? { apiKey: keyInp.value.trim() } : {}),
-                };
-          Promise.resolve(options.onTranslatorSaveProvider(req))
-            .then((res) => {
-              if (res?.ok) {
-                if (res.data) uiState.thoughtProviderStatus = res.data;
-                if (keyInp) keyInp.value = '';
-                setThStatus(t('thoughtSavedOk', 'Saved'), 'ok');
-                ctx.refreshAllViews?.();
-              } else {
-                setThStatus(res?.error || t('thoughtOfflineErr', 'Save failed'), 'error');
-              }
-            })
-            .catch((err) => setThStatus(err?.message || 'Save failed', 'error'));
-        },
-      })
-    );
-    if (curEngine !== 'mt') {
+    if (!isMt) {
       provBtns.appendChild(
         mkChip({
-          label: t('thoughtClearKeyBtn', 'Clear Key'),
-          active: false,
-          risk: 'high',
-          testId: 'ag-sag-thought-clearkey-btn',
+          label: t('thoughtSaveBtn', 'Save Provider'),
+          active: true,
+          testId: 'ag-sag-thought-save-btn',
           onClick: () => {
             if (typeof options.onTranslatorSaveProvider !== 'function') {
-              setThStatus(t('thoughtOfflineErr', 'Watch Sidecar offline'), 'error');
+              setThStatus(t('thoughtOfflineErr', 'Background service not ready'), 'error');
               return;
             }
-            Promise.resolve(options.onTranslatorSaveProvider({ engine: curEngine, clearApiKey: true }))
+            const req = {
+              engine: curEngine,
+              baseUrl: baseInp?.value?.trim() || '',
+              model: modelInp?.value?.trim() || '',
+              ...(keyInp?.value?.trim() ? { apiKey: keyInp.value.trim() } : {}),
+            };
+            Promise.resolve(options.onTranslatorSaveProvider(req))
               .then((res) => {
                 if (res?.ok) {
                   if (res.data) uiState.thoughtProviderStatus = res.data;
-                  setThStatus(t('thoughtSavedOk', 'Cleared'), 'ok');
+                  if (keyInp) keyInp.value = '';
+                  setThStatus(t('thoughtSavedOk', 'Saved'), 'ok');
                   ctx.refreshAllViews?.();
                 } else {
-                  setThStatus(res?.error || 'Clear failed', 'error');
+                  setThStatus(res?.error || t('thoughtOfflineErr', 'Save failed'), 'error');
                 }
               })
-              .catch((err) => setThStatus(err?.message || 'Clear failed', 'error'));
+              .catch((err) => setThStatus(err?.message || 'Save failed', 'error'));
           },
         })
       );
+      if (!isOllama) {
+        provBtns.appendChild(
+          mkChip({
+            label: t('thoughtClearKeyBtn', 'Clear Key'),
+            active: false,
+            risk: 'high',
+            testId: 'ag-sag-thought-clearkey-btn',
+            onClick: () => {
+              if (typeof options.onTranslatorSaveProvider !== 'function') {
+                setThStatus(t('thoughtOfflineErr', 'Background service not ready'), 'error');
+                return;
+              }
+              Promise.resolve(options.onTranslatorSaveProvider({ engine: curEngine, clearApiKey: true }))
+                .then((res) => {
+                  if (res?.ok) {
+                    if (res.data) uiState.thoughtProviderStatus = res.data;
+                    setThStatus(t('thoughtSavedOk', 'Cleared'), 'ok');
+                    ctx.refreshAllViews?.();
+                  } else {
+                    setThStatus(res?.error || 'Clear failed', 'error');
+                  }
+                })
+                .catch((err) => setThStatus(err?.message || 'Clear failed', 'error'));
+            },
+          })
+        );
+      }
     }
     provBtns.appendChild(
       mkChip({
@@ -1137,7 +1144,7 @@
         testId: 'ag-sag-thought-test-btn',
         onClick: () => {
           if (typeof options.onTranslatorDiagnose !== 'function') {
-            setThStatus(t('thoughtOfflineErr', 'Watch Sidecar offline'), 'error');
+            setThStatus(t('thoughtOfflineErr', 'Background service not ready'), 'error');
             return;
           }
           const targetLang = cfg.thoughtTargetLang && cfg.thoughtTargetLang !== 'auto'
@@ -1145,7 +1152,7 @@
             : cfg.hostI18nLocale && cfg.hostI18nLocale !== 'auto' && cfg.hostI18nLocale !== 'en'
               ? cfg.hostI18nLocale
               : 'zh-CN';
-          setThStatus('Testing…', 'info');
+          setThStatus('…', 'info');
           Promise.resolve(options.onTranslatorDiagnose({ engine: curEngine, targetLang }))
             .then((res) => {
               if (res?.ok && res.data) {
@@ -1175,38 +1182,76 @@
         })
       );
     }
-    const styleWrap = doc.createElement('div');
-    styleWrap.className = 'ag-sag-ext-grid';
-    for (const [sid, sLbl] of [
-      ['technical', t('thoughtStyleTech', 'Technical Notes')],
-      ['concise', t('thoughtStyleConcise', 'Concise')],
-    ]) {
-      styleWrap.appendChild(
-        mkChip({
-          label: sLbl,
-          active: (cfg.thoughtStylePreset || 'technical') === sid,
-          attr: 'data-ag-sag-thought-style',
-          val: sid,
-          onClick: () => updateConfig({ thoughtStylePreset: sid }),
+    if (!isMt) {
+      const styleWrap = doc.createElement('div');
+      styleWrap.className = 'ag-sag-ext-grid';
+      for (const [sid, sLbl] of [
+        ['technical', t('thoughtStyleTech', 'Technical Notes')],
+        ['concise', t('thoughtStyleConcise', 'Concise')],
+      ]) {
+        styleWrap.appendChild(
+          mkChip({
+            label: sLbl,
+            active: (cfg.thoughtStylePreset || 'technical') === sid,
+            attr: 'data-ag-sag-thought-style',
+            val: sid,
+            onClick: () => updateConfig({ thoughtStylePreset: sid }),
+          })
+        );
+      }
+      thBody.appendChild(
+        mkSuiteRow(t('thoughtStyleLabel', 'Style Preset'), '', styleWrap, {
+          searchExtra: 'thoughtStylePreset technical concise prompt',
         })
       );
     }
-    thBody.appendChild(
-      mkSuiteRow(t('thoughtStyleLabel', 'Style Preset'), '', styleWrap, {
-        searchExtra: 'thoughtStylePreset technical concise prompt',
-      })
-    );
     provWrap.appendChild(provBtns);
     provWrap.appendChild(thStatusEl);
     thBody.appendChild(
-      mkSuiteRow(t('thoughtProviderLabel', 'Model & Secret Settings (0600 Isolated)'), '', provWrap, {
-        stacked: true,
+      mkSuiteRow(isMt ? t('thoughtToolsLabel', 'Connection & Cache') : t('thoughtProviderLabel', 'Model & Endpoint Settings'), '', provWrap, {
+        stacked: !isMt,
         searchExtra: 'thoughtTranslate apikey model baseUrl ollama openai anthropic gemini mt',
       })
     );
 
     thDetails.appendChild(thBody);
     pane.appendChild(thDetails);
+
+    if (!novConnected && !novState?.installed) {
+      if (ctx.allowNovAutoRefresh !== false && !novState?.bridgeConnected && novSynergy?.isBridgeAvailable?.() && !uiState.novAutoRefreshInFlight && !uiState.novAutoRefreshAttempted) {
+        uiState.novAutoRefreshInFlight = uiState.novAutoRefreshAttempted = true;
+        Promise.resolve(novSynergy.refresh?.()).catch(() => {}).finally(() => { uiState.novAutoRefreshInFlight = false; });
+      }
+      const cmd = novSynergyMod?.NOV_INSTALL_CMD || 'agy plugin install https://github.com/tone-leh/agy-NOV';
+      const el = (t0, c0, x0) => { const n = doc.createElement(t0); if (c0) n.className = c0; if (x0) n.textContent = x0; return n; };
+      const promo = el('div', 'ag-sag-nov-promo ag-sag-nov-promo-compact');
+      promo.setAttribute('data-testid', 'ag-sag-nov-promo');
+      promo.setAttribute('data-ag-sag-search', 'agy-nov install');
+      const hl = el('div', 'ag-sag-nov-promo-line');
+      hl.appendChild(el('span', 'ag-sag-nov-promo-title', t('novPromoTitle', 'Pair with agy-NOV')));
+      hl.appendChild(el('span', 'ag-sag-nov-promo-desc', t('novPromoDesc', '')));
+      const cr = el('div', 'ag-sag-nov-cmd-row');
+      const cc = el('code', 'ag-sag-nov-cmd-code', cmd);
+      cc.setAttribute('data-testid', 'ag-sag-nov-install-cmd');
+      const cb = el('button', 'ag-sag-synergy-act', uiState.copiedInstallFeedback ? t('novPromoCopiedBtn', 'Copied') : t('novPromoCopyBtn', 'Copy'));
+      cb.type = 'button';
+      cb.setAttribute('data-ag-nov-copy-install', '1');
+      cb.addEventListener('click', (ev) => {
+        ev?.preventDefault?.();
+        ev?.stopPropagation?.();
+        try { (options.onCopyText || ((s) => win?.navigator?.clipboard?.writeText?.(s)?.catch?.(() => {})))(cmd); } catch {}
+        uiState.copiedInstallFeedback = true;
+        refreshAllViews?.();
+        if (uiState.copyResetTimer) clearTimeout(uiState.copyResetTimer);
+        uiState.copyResetTimer = setTimeout(() => { uiState.copyResetTimer = null; if (!isDestroyed?.()) { uiState.copiedInstallFeedback = false; refreshAllViews?.(); } }, 1800);
+        uiState.copyResetTimer?.unref?.();
+      });
+      cr.appendChild(cc);
+      cr.appendChild(cb);
+      promo.appendChild(hl);
+      promo.appendChild(cr);
+      pane.appendChild(promo);
+    }
   }
 
   return { renderUiTab };

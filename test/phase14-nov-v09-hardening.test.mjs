@@ -240,7 +240,19 @@ test('Phase 14: promptLibrary exposes agy-NOV v0.9 playbooks when connected & HU
   assert.equal(novSeg.text, 'NOV !');
   assert.equal(novSeg.tone, 'warn');
   assert.match(novSeg.title, /Verify fail/);
-  assert.match(novSeg.title, /Guard force_ask 2/);
+  assert.match(novSeg.title, /Guard confirm 2/);
+
+  const zhSag = require('../packages/core/i18n.js').getSagStrings('zh-CN');
+  const zhSegs = statusPillMod.computeHudSegments({
+    cfg: { modules: {} },
+    nov: { connected: true, enabledCount: 9, total: 13, verifyFailed: true, guardForceAsk: 2 },
+    strings: require('../packages/core/i18n.js').getStrings('zh-CN'),
+    sagStrings: zhSag,
+  });
+  const zhNov = zhSegs.find((s) => s.id === 'nov');
+  assert.ok(zhNov);
+  assert.equal(/force_ask|Verify|Guard/i.test(zhNov.title), false);
+  assert.ok(zhNov.title.includes('需确认 2'));
 
   // nov-synergy normalizeNovFeed preserves v0.8/v0.9 fields
   const syn = novSynergyMod.createNovSynergyController({

@@ -19,9 +19,9 @@
     const allMeta = Object.values(metaMap);
 
     const groupTitleMap = {
-      ui: t('groupUi', 'UI Layer'),
-      conversation: t('groupConversation', 'Conversation Layer'),
-      guard: t('groupGuard', 'Guard Layer'),
+      ui: t('groupUi', 'Interface'),
+      conversation: t('groupConversation', 'Conversation'),
+      guard: t('groupGuard', 'Protection'),
     };
 
     for (const grp of groups) {

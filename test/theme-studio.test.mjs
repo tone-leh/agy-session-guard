@@ -144,7 +144,7 @@ test('ThemeStudio: all presets & switches generate valid CSS with strictly zero 
   }
 
   const oledCss = themeStudio.buildThemeCss({ preset: 'oled-pure' });
-  assert.ok(oledCss.includes('--background:#000000;'));
+  assert.match(oledCss, /--background:#000000(?:!important)?;/);
 
   const noCjkCss = themeStudio.buildThemeCss({ preset: 'native', cjkFontTuning: false });
   assert.equal(noCjkCss.includes('"PingFang SC"'), false);
@@ -308,7 +308,7 @@ test('ThemeStudio: default opt-in stays inert until enabled, handles Prism yield
   assert.equal(doc.documentElement.getAttribute('data-ag-sag-theme-policy'), 'takeover');
   assert.equal(doc.documentElement.getAttribute('data-ag-sag-theme-colors'), 'active');
   assert.equal(ctl.getDebugState().colorsYielded, false);
-  assert.ok(styleEl.textContent.includes('--background:#2e3440;'));
+  assert.match(styleEl.textContent, /--background:#2e3440(?:!important)?;/);
   assert.equal(styleEl.textContent.includes(':has('), false);
 
   // Disable via setEnabled(false) removes style and attributes cleanly

@@ -123,6 +123,7 @@
     autoAccept = null,
     nov = null,
     strings = {},
+    sagStrings = null,
     formatTokens = null,
   } = {}) {
     const mods = cfg?.modules || {};
@@ -249,7 +250,7 @@
       });
     }
 
-    // 7. nov segment (enriched with read-only sag:nov_feed lock/drift/guard signals)
+    // 7. nov segment: stay restrained in idle state; only surface when there is a pending alert/event
     if (nov && nov.connected) {
       const on = Number(nov.enabledCount) || 0;
       const total = Number(nov.total) || 13;
@@ -257,39 +258,43 @@
       const drifted = Math.max(0, Number(nov.memDrifted) || 0);
       const blocked = Math.max(0, Number(nov.guardBlocked) || 0);
       const forceAsk = Math.max(0, Number(nov.guardForceAsk) || 0);
+      const radarAwaiting = Math.max(0, Number(nov.radarAwaiting) || 0);
       const verifyFail = Boolean(nov.verifyFailed);
       const verifyBlocked = Boolean(nov.verifyBlocked);
       const healthScore = typeof nov.healthScore === 'number' && Number.isFinite(nov.healthScore) ? nov.healthScore : null;
-      let text = 'NOV';
-      let tone = 'accent';
-      if (locked) {
-        text = 'NOV 🔒';
-        tone = 'warn';
-      } else if (verifyBlocked) {
-        text = 'NOV ⛔';
-        tone = 'warn';
-      } else if (verifyFail) {
-        text = 'NOV !';
-        tone = 'warn';
-      } else if (drifted > 0) {
-        text = `NOV · Δ${drifted}`;
-        tone = 'warn';
+      const hasPendingEvent = locked || verifyBlocked || verifyFail || drifted > 0 || radarAwaiting > 0 || forceAsk > 0;
+      if (hasPendingEvent) {
+        let text = 'NOV !';
+        const tone = 'warn';
+        if (locked) {
+          text = 'NOV 🔒';
+        } else if (verifyBlocked) {
+          text = 'NOV ⛔';
+        } else if (verifyFail) {
+          text = 'NOV !';
+        } else if (drifted > 0) {
+          text = `NOV · Δ${drifted}`;
+        } else if (radarAwaiting > 0 || forceAsk > 0) {
+          text = `NOV · ⏳${radarAwaiting + forceAsk}`;
+        }
+        const novStr = sagStrings && typeof sagStrings === 'object' ? sagStrings : {};
+        const extras = [];
+        if (locked) extras.push(novStr.hudNovSpecLock || 'Spec Lock');
+        if (verifyBlocked) extras.push(novStr.hudNovVerifyBlocked || 'Verify blocked');
+        else if (verifyFail) extras.push(novStr.hudNovVerifyFail || 'Verify fail');
+        if (drifted > 0) extras.push(formatTpl(novStr.hudNovMemDrift || 'Mem drift {n}', { n: drifted }));
+        if (radarAwaiting > 0) extras.push(formatTpl(novStr.hudNovAwaiting || 'Awaiting {n}', { n: radarAwaiting }));
+        if (blocked > 0) extras.push(formatTpl(novStr.hudNovGuardBlocked || 'Guard blocked {n}', { n: blocked }));
+        if (forceAsk > 0) extras.push(formatTpl(novStr.hudNovGuardConfirm || 'Guard confirm {n}', { n: forceAsk }));
+        if (healthScore !== null) extras.push(formatTpl(novStr.hudNovHealth || 'Health {n}', { n: healthScore }));
+        const baseTitle = formatTpl(strings.hudNovTitle || 'agy-NOV connected', { on, total });
+        segs.push({
+          id: 'nov',
+          text,
+          tone,
+          title: extras.length ? `${baseTitle} · ${extras.join(' · ')}` : baseTitle,
+        });
       }
-      const extras = [];
-      if (locked) extras.push('Spec Lock');
-      if (verifyBlocked) extras.push('Verify blocked');
-      else if (verifyFail) extras.push('Verify fail');
-      if (drifted > 0) extras.push(`Mem drift ${drifted}`);
-      if (blocked > 0) extras.push(`Guard blocked ${blocked}`);
-      if (forceAsk > 0) extras.push(`Guard force_ask ${forceAsk}`);
-      if (healthScore !== null) extras.push(`Health ${healthScore}`);
-      const baseTitle = formatTpl(strings.hudNovTitle || 'agy-NOV connected · {on}/{total} modules', { on, total });
-      segs.push({
-        id: 'nov',
-        text,
-        tone,
-        title: extras.length ? `${baseTitle} · ${extras.join(' · ')}` : baseTitle,
-      });
     }
 
     // 8. brand fallback
@@ -394,6 +399,7 @@
 
     function removeStandalonePill() {
       cardOpen = false;
+      try { cardEl?.remove?.(); } catch {}
       try { wrapEl?.remove?.(); } catch {}
       wrapEl = pillBtn = dotEl = segsEl = cardEl = null;
     }
@@ -481,6 +487,7 @@
         autoAccept: lastState.autoAccept,
         nov: buildNovInput(cfg),
         strings,
+        sagStrings: typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : null,
         formatTokens: ctxSrc?.formatTokens,
       });
     }
@@ -578,7 +585,7 @@
       return 'ok';
     }
 
-    function appendMeterRow(container, { label, pct, sub, tone, testAttr, title }) {
+    function appendMeterRow(container, { label, pct, sub, tone, testAttr, title, thresholdPct, segments }) {
       const row = mk('div', 'ag-sag-meter', undefined, testAttr ? { 'data-ag-sag-card-metric': testAttr } : null);
       if (title) row.title = title;
       const top = mk('div', 'ag-sag-meter-head');
@@ -589,10 +596,27 @@
       top.appendChild(valWrap);
       row.appendChild(top);
       const track = mk('div', 'ag-sag-quota-bar ag-sag-meter-track');
-      const fill = mk('span', 'ag-sag-quota-bar-fill', undefined, { 'data-tone': tone || 'ok' });
       const clamped = pct === null ? 0 : Math.max(0, Math.min(100, pct));
-      if (fill.style) fill.style.width = `${clamped}%`;
-      track.appendChild(fill);
+      const validSegs = Array.isArray(segments) ? segments.filter((s) => s && s.pct > 0) : [];
+      if (clamped > 0 && validSegs.length > 0) {
+        const segWrap = mk('span', 'ag-sag-quota-bar-fill ag-sag-meter-subsegs');
+        if (segWrap.style) segWrap.style.width = `${clamped}%`;
+        for (const sg of validSegs) {
+          const part = mk('span', 'ag-sag-meter-seg', undefined, { 'data-kind': sg.kind });
+          if (part.style) part.style.width = `${sg.pct}%`;
+          segWrap.appendChild(part);
+        }
+        track.appendChild(segWrap);
+      } else {
+        const fill = mk('span', 'ag-sag-quota-bar-fill', undefined, { 'data-tone': tone || 'ok' });
+        if (fill.style) fill.style.width = `${clamped}%`;
+        track.appendChild(fill);
+      }
+      if (typeof thresholdPct === 'number' && Number.isFinite(thresholdPct) && thresholdPct > 0 && thresholdPct < 100) {
+        const thMark = mk('span', 'ag-sag-meter-th', undefined, { 'data-ag-sag-th': String(thresholdPct) });
+        if (thMark.style) thMark.style.left = `${thresholdPct}%`;
+        track.appendChild(thMark);
+      }
       row.appendChild(track);
       container.appendChild(row);
     }
@@ -627,22 +651,32 @@
           : '';
       const rawSrc = String(snap?.source || snap?.telemetry?.dataSource || '');
       const srcTag = formatDataSourceLabel(rawSrc);
-      if (elapsedText) {
-        metaWrap.appendChild(mk('span', 'ag-sag-card-elapsed', elapsedText));
-      }
-      if (srcTag && rawSrc !== 'dom-est') {
-        const srcEl = mk('span', 'ag-sag-card-source', srcTag, {
-          'data-testid': 'ag-sag-card-source',
-          'data-source': rawSrc,
-        });
-        metaWrap.appendChild(srcEl);
-      } else if (srcTag) {
-        metaWrap.title = srcTag;
-      }
+      if (elapsedText) metaWrap.appendChild(mk('span', 'ag-sag-card-elapsed', elapsedText));
+      if (srcTag) head.title = srcTag;
       head.appendChild(metaWrap);
       cardEl.appendChild(head);
 
-      // 2. Model Quota section (Prism-aligned: real 5h & weekly remaining % + reset countdown, zero fake turn counts)
+      // 2. Hero: Optical Context Well + Vial (left) + Real 5h & Weekly Quota (right)
+      const thNum = cfg.compactThreshold === 'off' ? null : Number(cfg.compactThreshold);
+      const ctxTone = ratioTone(ctxPct ?? 0, false);
+      const hero = mk('div', 'ag-sg-hr');
+      const vWell = mk('div', 'ag-sg-vw');
+      const vHead = mk('div', 'ag-sg-vh');
+      vHead.appendChild(mk('span', undefined, 'CTX'));
+      vHead.appendChild(mk('strong', undefined, ctxPct === null ? '—' : `${ctxPct}%`, { 'data-tone': ctxTone }));
+      vWell.appendChild(vHead);
+      const vTube = mk('div', 'ag-sg-vt');
+      const vFill = mk('span', 'ag-sg-vf', undefined, { 'data-tone': ctxTone });
+      if (vFill.style) vFill.style.height = `${ctxPct === null ? 8 : Math.max(8, Math.min(100, ctxPct))}%`;
+      vTube.appendChild(vFill);
+      if (Number.isFinite(thNum) && thNum > 0 && thNum < 100) {
+        const vTh = mk('span', 'ag-sg-vth', undefined, { title: `${thNum}%` });
+        if (vTh.style) vTh.style.bottom = `${thNum}%`;
+        vTube.appendChild(vTh);
+      }
+      vWell.appendChild(vTube);
+      hero.appendChild(vWell);
+
       if (mods.quotaPulse) {
         const qSec = mk('section', 'ag-sag-qsec', undefined, { 'data-testid': 'ag-sag-quota-section' });
         const liveGroups = Array.isArray(lastState.quotaSummary?.groups) ? lastState.quotaSummary.groups : [];
@@ -728,17 +762,37 @@
             rows.appendChild(row);
             qSec.appendChild(rows);
           } else {
-            qSec.appendChild(mk('div', 'ag-sag-qnote', sagStr.cardQuotaOffline || 'Waiting for local quota service'));
+            qSec.appendChild(mk('div', 'ag-sag-qnote', sagStr.cardQuotaOffline || 'Loading quota…'));
           }
         }
-        cardEl.appendChild(qSec);
+        hero.appendChild(qSec);
+      }
+      cardEl.appendChild(hero);
+
+      // Compute conversation breakdown early so context bar shows layered luminous segments
+      let bd = null;
+      if (mods.compactGuard && typeof ctxSrc?.analyzeContextBreakdown === 'function') {
+        const nowMs = Date.now();
+        const curCid = String(lastState.snap?.cascadeId || '');
+        if (!lastBreakdownCache || nowMs - lastBreakdownCache.ts > 3000 || lastBreakdownCache.cid !== curCid) {
+          lastBreakdownCache = { ts: nowMs, cid: curCid, data: ctxSrc.analyzeContextBreakdown(doc, activePaneEl) };
+        }
+        bd = lastBreakdownCache.data;
       }
 
-      // 3. Compact current context bar
+      // 3. Compact current context bar with compression threshold marker & luminous segments
       const meters = mk('div', 'ag-sag-meters');
       if (mods.compactGuard) {
-        const autoNote = cfg.compactThreshold === 'off' ? '' : formatTpl(sagStr.cardAutoAt || 'Auto at {th}', { th: thText });
-        const ctxSub = [tokText, cfg.compactThreshold === 'off' ? '' : thText].filter(Boolean).join(' · ');
+        const autoNote = cfg.compactThreshold === 'off' ? '' : formatTpl(sagStr.cardAutoAt || '{th} auto-compact', { th: thText });
+        const ctxSub = [tokText, autoNote || (cfg.compactThreshold === 'off' ? '' : thText)].filter(Boolean).join(' · ');
+        const segList =
+          bd && bd.totalChars > 0
+            ? [
+                { kind: 'user', pct: bd.shares.userPct },
+                { kind: 'assistant', pct: bd.shares.assistantPct },
+                { kind: 'code', pct: bd.shares.codeToolsPct },
+              ]
+            : null;
         appendMeterRow(meters, {
           label: sagStr.cardContextTitle || strings.cardContextLabel || 'Context',
           pct: ctxPct,
@@ -746,6 +800,8 @@
           tone: ratioTone(ctxPct ?? 0, false),
           testAttr: 'context',
           title: [tokText, autoNote].filter(Boolean).join(' · '),
+          thresholdPct: Number.isFinite(thNum) ? thNum : null,
+          segments: segList,
         });
       }
       if (meters.children.length > 0) cardEl.appendChild(meters);
@@ -770,23 +826,12 @@
       if (qCnt > 0) {
         chips.appendChild(mk('span', 'ag-sag-card-chip', formatTpl(sagStr.cardChipQueue || '{n} queued', { n: qCnt }), { 'data-ag-sag-card-metric': 'queue' }));
       }
-      const novInfo = buildNovInput(cfg);
-      if (novInfo.connected) {
-        chips.appendChild(mk('span', 'ag-sag-card-chip', `NOV ${novInfo.enabledCount}/${novInfo.total}`, { 'data-ag-sag-card-metric': 'nov' }));
-      }
       if (chips.children.length > 0) cardEl.appendChild(chips);
 
       // 4. Collapsible breakdown & activity details (collapsed by default so main view stays clean)
       let lensNode = null;
-      if (mods.compactGuard && typeof ctxSrc?.analyzeContextBreakdown === 'function') {
-        const nowMs = Date.now();
-        const curCid = String(lastState.snap?.cascadeId || '');
-        if (!lastBreakdownCache || nowMs - lastBreakdownCache.ts > 3000 || lastBreakdownCache.cid !== curCid) {
-          lastBreakdownCache = { ts: nowMs, cid: curCid, data: ctxSrc.analyzeContextBreakdown(doc, activePaneEl) };
-        }
-        const bd = lastBreakdownCache.data;
-        if (bd && bd.totalChars > 0) {
-          const lens = mk('div', 'ag-sag-ctx-lens', undefined, { 'data-testid': 'ag-sag-ctx-lens' });
+      if (bd && bd.totalChars > 0) {
+        const lens = mk('div', 'ag-sag-ctx-lens', undefined, { 'data-testid': 'ag-sag-ctx-lens' });
           const bar = mk('div', 'ag-sag-ctx-bar');
           const segDefs = [
             { kind: 'user', pct: bd.shares.userPct, label: sagStr.ctxLensUser || 'User' },
@@ -821,16 +866,18 @@
             lens.appendChild(topRow);
           }
           lensNode = lens;
-        }
       }
 
       let telNode = null;
       const tel = snap?.telemetry || lastState.telemetry || null;
       if (tel && typeof tel === 'object' && [tel.active5hSessions, tel.active5hSteps, tel.active7dSteps].some((n) => Number.isFinite(Number(n)))) {
         const num = (v) => Math.max(0, Math.round(Number(v) || 0));
+        const isZh = getLang().startsWith('zh') || getLang() === 'yue';
         const telRow = mk('div', 'ag-sag-telemetry-row', undefined, { 'data-testid': 'ag-sag-telemetry-row' });
-        telRow.appendChild(mk('span', undefined, `5h · ${num(tel.active5hSessions)} sess / ${num(tel.active5hSteps)} steps`));
-        telRow.appendChild(mk('span', undefined, `7d · ${num(tel.active7dSteps)} steps`));
+        telRow.appendChild(
+          mk('span', undefined, isZh ? `5h · ${num(tel.active5hSessions)} 会话 / ${num(tel.active5hSteps)} 步` : `5h · ${num(tel.active5hSessions)} sess / ${num(tel.active5hSteps)} steps`)
+        );
+        telRow.appendChild(mk('span', undefined, isZh ? `7d · ${num(tel.active7dSteps)} 步` : `7d · ${num(tel.active7dSteps)} steps`));
         telNode = telRow;
       }
 
@@ -855,6 +902,20 @@
       if (typeof options.onCleanRestart === 'function') addAct('ag-sg-btn ag-sg-btn-primary', sagStr.cardBtnRestart || strings.btnClearKeep, 'clean-restart', () => options.onCleanRestart({ mode: 'keep' }), strings.clearKeepTip);
       if (typeof options.onOpenSettings === 'function') addAct('ag-sg-btn', sagStr.cardBtnSettings || 'Settings', 'open-settings', () => options.onOpenSettings('overview'));
       if (foot.children.length > 0) cardEl.appendChild(foot);
+
+      const pr = typeof pillBtn?.getBoundingClientRect === 'function' ? pillBtn.getBoundingClientRect() : null;
+      if (pr && pr.width > 0 && doc.body && cardEl.style) {
+        if (cardEl.parentElement !== doc.body) {
+          coexist.markOwnedNoTranslate(cardEl);
+          doc.body.appendChild(cardEl);
+        }
+        const vw = Number(win?.innerWidth) || 1280;
+        const vh = Number(win?.innerHeight) || 800;
+        const cw = Math.min(360, vw - 28);
+        cardEl.setAttribute('data-portal', '1');
+        cardEl.style.left = `${Math.max(12, Math.min(vw - cw - 12, Math.round(pr.right - cw)))}px`;
+        cardEl.style.bottom = `${Math.max(12, Math.round(vh - pr.top + 10))}px`;
+      }
     }
 
     function ensureStandalonePill() {
@@ -927,6 +988,9 @@
       }
 
       const titles = segs.map((s) => s.title).filter(Boolean);
+      if (synergyOn && !segs.some((s) => s.id === 'nov')) {
+        titles.push(formatTpl(strings.hudNovTitle || 'agy-NOV connected', { on: novInfo.enabledCount || 0, total: novInfo.total || 13 }));
+      }
       if (strings.pillEntryTitle) titles.push(strings.pillEntryTitle);
       pillBtn.title = titles.join(' · ');
 
@@ -984,7 +1048,7 @@
     const onOutsideClick = (ev) => {
       if (!cardOpen || destroyed || !wrapEl) return;
       const t = ev?.target;
-      if (t && (t === wrapEl || t.closest?.('[data-testid="ag-sg-pill-wrap"]'))) return;
+      if (t && (t === wrapEl || t === cardEl || t.closest?.('[data-testid="ag-sg-pill-wrap"],[data-testid="ag-sg-status-card"]'))) return;
       close();
     };
     const onKeyDown = (ev) => {

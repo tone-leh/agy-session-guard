@@ -159,6 +159,7 @@
     const win = options.win || globalRoot;
     const doc = options.doc || win?.document || null;
     const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
+    const i18n = options.i18n || resolveDep('__agSgI18n', './i18n.js');
 
     let enabled = Boolean(options.enabled);
     let engine = String(options.engine || 'mt');
@@ -422,7 +423,8 @@
       }
       if (inFlightKeys.has(cacheKey)) return { ok: false, reason: 'in-flight' };
       if (typeof options.onRequestTranslate !== 'function') {
-        renderTranslatedBox(panel, '', { sourceText: text, lang, error: 'Watch sidecar bridge offline' });
+        const offlineMsg = i18n?.getSagStrings?.(lang)?.thoughtOfflineErr || 'Background service unavailable — restart plugin and retry';
+        renderTranslatedBox(panel, '', { sourceText: text, lang, error: offlineMsg });
         return { ok: false, reason: 'bridge-offline' };
       }
       const epoch = runEpoch;

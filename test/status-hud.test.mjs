@@ -115,8 +115,8 @@ test('computeHudSegments formats stalled state in m:ss format', () => {
   assert.equal(segs[0].tone, 'warn');
 });
 
-test('computeHudSegments appends nov as trailing accent segment and supports autoAccept dryRun text', () => {
-  const segs = statusPill.computeHudSegments({
+test('computeHudSegments omits nov when connected & idle, and surfaces nov warn segment only on pending alerts', () => {
+  const segsIdle = statusPill.computeHudSegments({
     cfg: makeCfg({
       compactGuard: true,
       sessionWatchdog: false,
@@ -129,11 +129,25 @@ test('computeHudSegments appends nov as trailing accent segment and supports aut
     nov: { connected: true, enabledCount: 5, total: 13 },
     strings: enStrings,
   });
-  assert.deepEqual(segs.map((s) => s.id), ['ctx', 'bookmarks', 'autoAccept', 'nov']);
-  assert.equal(segs[2].text, enStrings.hudAutoAcceptDryRun);
-  assert.equal(segs[2].tone, 'idle');
-  assert.equal(segs[3].id, 'nov');
-  assert.equal(segs[3].text, 'NOV');
-  assert.equal(segs[3].tone, 'accent');
-  assert.ok(segs[3].title.includes('5/13'));
+  assert.deepEqual(segsIdle.map((s) => s.id), ['ctx', 'bookmarks', 'autoAccept']);
+  assert.equal(segsIdle[2].text, enStrings.hudAutoAcceptDryRun);
+  assert.equal(segsIdle[2].tone, 'idle');
+
+  const segsAlert = statusPill.computeHudSegments({
+    cfg: makeCfg({
+      compactGuard: true,
+      sessionWatchdog: false,
+      outlineBookmarks: true,
+      safeAutoAccept: true,
+    }),
+    snap: { usedPct: 50 },
+    bookmarkCount: 2,
+    autoAccept: { enabled: true, paused: false, dryRun: true },
+    nov: { connected: true, enabledCount: 5, total: 13, radarAwaiting: 2 },
+    strings: enStrings,
+  });
+  assert.deepEqual(segsAlert.map((s) => s.id), ['ctx', 'bookmarks', 'autoAccept', 'nov']);
+  assert.equal(segsAlert[3].text, 'NOV · ⏳2');
+  assert.equal(segsAlert[3].tone, 'warn');
+  assert.ok(segsAlert[3].title.includes('agy-NOV'));
 });

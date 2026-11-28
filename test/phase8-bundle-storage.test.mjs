@@ -241,6 +241,10 @@ test('Phase 8B: Settings Advanced tab renders storage audit card and updates sum
   });
   try {
     pb.openDrawer('advanced');
+    const summaryBefore = doc.querySelector('[data-testid="ag-sag-storage-summary"]');
+    assert.ok(summaryBefore);
+    assert.equal(summaryBefore.textContent.includes('unavailable'), false);
+    assert.ok(summaryBefore.textContent.includes('Audit Storage'));
     const auditBtn = doc.querySelector('[data-testid="ag-sag-storage-audit-btn"]');
     assert.ok(auditBtn, 'Audit button rendered in Advanced tab');
     auditBtn.click();
@@ -248,8 +252,8 @@ test('Phase 8B: Settings Advanced tab renders storage audit card and updates sum
     const summary = doc.querySelector('[data-testid="ag-sag-storage-summary"]');
     assert.ok(summary.textContent.includes('10.0 MiB'));
     assert.ok(summary.textContent.includes('88 files'));
-    assert.ok(summary.textContent.includes('6 brain'));
-    assert.ok(summary.textContent.includes('2 orphans'));
+    assert.ok(summary.textContent.includes('6 sessions'));
+    assert.ok(summary.textContent.includes('2 leftover'));
 
     doc.querySelector('[data-testid="ag-sag-storage-copy-cmd"]').click();
     assert.ok(copied.includes('storage backup'));

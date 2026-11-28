@@ -665,12 +665,68 @@ test('Phase 13 hardening: Look switching clears prior codeFont/ligatures, matche
   doc.querySelector('[data-ag-sag-theme-accent="rose"]').click();
   assert.equal(doc.querySelector('[data-ag-sag-look="matcha-note"]').getAttribute('aria-pressed'), 'false');
 
-  // Enable prism-obsidian (autoPair=true), then click light skin matcha-journal on dark host -> disables autoPair so WYSIWYG
+  // Enable prism-obsidian (WYSIWYG), explicitly toggle autoPair ON, then click light skin matcha-journal -> disables autoPair so WYSIWYG
   doc.querySelector('[data-ag-sag-look="prism-obsidian"]').click();
+  assert.equal(cfg.themeAutoPair, false);
+  doc.querySelector('[data-ag-sag-theme-autopair]').click();
   assert.equal(cfg.themeAutoPair, true);
   doc.querySelector('[data-ag-sag-theme="matcha-journal"]').click();
   assert.equal(cfg.themePreset, 'matcha-journal');
   assert.equal(cfg.themeAutoPair, false);
+
+  // Dark host with themeAutoPair=true clicking light look matcha-note must also disable autoPair immediately (WYSIWYG)
+  doc.querySelector('[data-ag-sag-theme-autopair]').click();
+  assert.equal(cfg.themeAutoPair, true);
+  doc.querySelector('[data-ag-sag-look="matcha-note"]').click();
+  assert.equal(cfg.themePreset, 'matcha-journal');
+  assert.equal(cfg.themeAutoPair, false);
+
+  // Light host with migrated themeAutoPair=true clicking dark look prism-obsidian must turn dark immediately
+  const lightDom = createRichMockDom({ hostTheme: 'light' });
+  const lightDlg = lightDom.makeEl('div');
+  lightDlg.setAttribute('role', 'dialog');
+  const lp6 = lightDom.makeEl('div');
+  lp6.className = 'p-6';
+  const lh2 = lightDom.makeEl('h2');
+  lh2.textContent = 'Appearance';
+  const lsec = lightDom.makeEl('div');
+  lsec.className = 'space-y-2';
+  lp6.appendChild(lh2);
+  lp6.appendChild(lsec);
+  lightDlg.appendChild(lp6);
+  lightDom.body.appendChild(lightDlg);
+  const lightStore = new Map([['agSag.ui.activeSubTab.v1', 'ui']]);
+  const lightFakeStorage = {
+    getItem: (k) => (lightStore.has(k) ? lightStore.get(k) : null),
+    setItem: (k, v) => lightStore.set(k, String(v)),
+    removeItem: (k) => lightStore.delete(k),
+  };
+  const lightInst = core.mountSag({
+    win: { document: lightDom.doc, localStorage: lightFakeStorage },
+    doc: lightDom.doc,
+    storage: lightFakeStorage,
+    autoObserve: false,
+    autoPoll: false,
+    bindVaultShortcut: false,
+    config: {
+      themePreset: 'obsidian-prism',
+      themeAutoPair: true,
+      modules: { themeStudio: true, hostI18n: false, compactGuard: false },
+    },
+  });
+  try {
+    assert.equal(lightDom.html.getAttribute('data-ag-sag-theme-resolved'), 'crystal-day');
+    assert.equal(lightDom.html.getAttribute('data-ag-sag-theme-scheme'), 'light');
+    lightDom.doc.querySelector('[data-ag-sag-look="prism-obsidian"]').click();
+    assert.equal(lightInst.getConfig().themeAutoPair, false);
+    assert.equal(lightDom.html.getAttribute('data-ag-sag-theme-resolved'), 'obsidian-prism');
+    assert.equal(lightDom.html.getAttribute('data-ag-sag-theme-scheme'), 'dark');
+    lightDom.doc.querySelector('[data-ag-sag-look="matcha-note"]').click();
+    assert.equal(lightDom.html.getAttribute('data-ag-sag-theme-resolved'), 'matcha-journal');
+    assert.equal(lightDom.html.getAttribute('data-ag-sag-theme-scheme'), 'light');
+  } finally {
+    lightInst.destroy();
+  }
 
   // Verify live host data-theme MutationObserver updates autoPair automatically
   const moInstances = [];

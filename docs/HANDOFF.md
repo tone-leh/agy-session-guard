@@ -1,4 +1,4 @@
-# agy-Sag Project Handoff Baseline (v1.5.1)
+# agy-Sag Project Handoff Baseline (v1.6.0)
 
 > This handoff document summarizes the verified architecture, module boundaries, dual-star synergy contract, and next priorities for dedicated `agy-Sag` agents.
 

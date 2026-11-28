@@ -9,7 +9,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const VERSION = '1.5.1';
+  const VERSION = '1.6.0';
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -861,7 +861,9 @@
         return options.onTranslatorBridge(type, payload);
       }
       if (!novSynergy || typeof novSynergy.requestRaw !== 'function' || !novSynergy.isBridgeAvailable?.()) {
-        return { ok: false, reason: 'bridge-offline', error: 'Watch sidecar bridge offline' };
+        const curLang = compactGuard.getConfig()?.hostI18nLocale || 'zh-CN';
+        const errMsg = i18n?.getSagStrings?.(curLang)?.thoughtOfflineErr || 'Background service unavailable';
+        return { ok: false, reason: 'bridge-offline', error: errMsg };
       }
       try {
         const res = await novSynergy.requestRaw(type, payload);

@@ -6,7 +6,7 @@
 
 内置 **10 国语言原生界面实时翻译**（每语种约 5,400 词条）、**统一 6-Tab 控制中心与 `Ctrl/Cmd+Alt+,` 全局设置抽屉**、**分段式状态胶囊 HUD**、**`Ctrl/Cmd+Alt+P` 提示词库与命令面板**、自定义阈值静默 `/compact` 防爆与视口滚动盾、流式运行中 **提示词排队**、防丢 **草稿保护**、轮次书签与跨会话档案库、带不可绕过高危黑名单的 **安全自动审批**、零 `:has()` **光学主题与中文字体排版**、零封号风险的 **只读配额脉冲**，以及离线 **本地存储体检与脱敏备份 CLI**——**全部模块独立开关，按需启用**。
 
-> **当前版本：** `v1.5.1` · **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
+> **当前版本：** `v1.6.0` · **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
 > **非官方社区项目与商标免责声明：** `agy-Sag` 为独立的开源社区项目，与 Google LLC 无任何隶属、赞助或官方背书关系；文中提及的 “Antigravity” 与 “Google” 仅作软件兼容性说明用途。
 
@@ -25,7 +25,7 @@
 
 ### 双星联动化学反应（零额外网络端口）
 
-同时安装 **`agy-Sag`** 与 **`agy-NOV`** 后，`agy-Sag` 统一控制中心（内嵌于 **Settings → Appearance** 或通过 `Ctrl/Cmd+Alt+,` 打开右侧抽屉）自动解锁 **`双星 NOV`** 面板，并与 `agy-NOV` 保持统一视觉设计 Token（`--sag-*` 对齐 `--nov-*`）：
+同时安装 **`agy-Sag`** 与 **`agy-NOV`** 后，`agy-Sag` 统一控制中心（内嵌于 **Settings → Appearance** 或通过 `Ctrl/Cmd+Alt+,` 打开右侧抽屉）自动解锁 **`agy-NOV`** 管理面板，并与 `agy-NOV` 保持统一视觉设计 Token（`--sag-*` 对齐 `--nov-*`）：
 
 - **在 Antigravity 原生设置里直接热控 `agy-NOV`（`v0.5–v1.2+`）**：按 5 大分类一键开关全部 **13 个 `agy-NOV` 纯原生模块**、切换 **5 档场景预设**（`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 工具），并在切换界面语言时自动同步 8 语种交集。通信复用 CDP `Runtime.addBinding`（零额外 HTTP 端口）通知 Sidecar 原子更新 `agy-NOV` 的 `config.json`（`0600`），`agy-NOV` 服务端通过原生文件签名热同步刷新 `tools/list`，全程保持 `agy-NOV` 零 CDP 纯净。
 - **提示词库只读消费 `agy-NOV` 工程模板（`promptLibrary` × `agy-NOV ops`）**：通过零端口 `sag:nov_templates` 只读通道读取 `agy-NOV` 的 `ops/prompts.json`（严格 symlink 拒止、`<= 256 KB` 上限、零磁盘写入），并在 `Ctrl/Cmd+Alt+P` 命令面板自动透出 5 条原生 Playbook（`/nov-spec`、`/nov-debug`、`/nov-review`、`/nov-handoff`、`/nov-workflow`）。
@@ -47,8 +47,8 @@
 
 ## 统一控制中心与分段状态胶囊 HUD
 
-- **单一真源 6-Tab 控制中心（`概览 | 界面 | 对话 | 守护 | 双星 NOV | 高级`）**：支持从原生 **Settings → Appearance**（左侧导航栏自动注入 `agy-Sag` 快捷锚点）、全局快捷键 **`Ctrl/Cmd+Alt+,`**（`420px` 右侧滑出抽屉，`Esc` 关闭）或状态卡底部「完整设置 →」直达。全部 14 个模块总开关集中在 `概览` 页（杜绝重复开关），低频项收纳在 `<details>` 折叠区，顶部搜索框跨全 Tab 即时过滤，`高级` 页提供配置 JSON 导出/校验导入、内联二次确认重置（零 `window.confirm`）、运行态诊断与零写入 **本地存储体检**（`sag:storage_audit`）；按 **`Ctrl/Cmd+Shift+Alt+/`** 随时呼出当前生效快捷键速查浮层（避让 Antigravity v2.36.0 原生 `Option+Cmd+/` 快捷键列表）。
-- **统一分段式状态胶囊 HUD 与上下文透镜**：输入框底栏以单枚紧凑胶囊汇总实时指标，各分段严格跟随对应模块开关增删（`ctx` 12px 圆环、`eta` 剩余轮数或 `m:ss` 停滞、`quota`、`queue`、`bookmarks`、`autoAccept`、`NOV`）。展开浮卡呈现纯本地 **三色上下文构成条**（提问 / 正文 / 代码与工具）、**Top-3 最重轮次跳转**、上一轮流式耗时、5h 配额进度条与一键「导出 MD」。检测到 Obsidian Prism 上下文卡片时自动无痕内嵌其 Shadow DOM，底栏零多余胶囊。
+- **单一真源控制中心（`概览 | 界面 | 对话 | 守护 | 高级`，已安装时显示 `agy-NOV`）**：支持从原生 **Settings → Appearance**、全局快捷键 **`Ctrl/Cmd+Alt+,`**（`420px` 右侧滑出抽屉，`Esc` 关闭）或状态卡底部「设置」直达。全部 14 个模块总开关集中在 `概览` 页（杜绝重复开关），低频项收纳在 `<details>` 折叠区，顶部搜索框跨全 Tab 即时过滤，`高级` 页提供配置导出/校验导入、内联二次确认重置（零 `window.confirm`）、状态摘要与只读 **本地数据检查**（`sag:storage_audit`）；未安装 `agy-NOV` 时仅在「界面」底部提供紧凑安装推荐条，不占用独立二级 Tab；按 **`Ctrl/Cmd+Shift+Alt+/`** 随时呼出当前生效快捷键速查浮层（避让 Antigravity v2.36.0 原生 `Option+Cmd+/` 快捷键列表）。
+- **统一分段式状态胶囊 HUD 与流光上下文窗**：输入框底栏以单枚紧凑胶囊汇总实时指标，各分段严格跟随对应模块开关增删（`ctx`、`eta`、`quota`、`queue`、`bookmarks`、`autoAccept`、`NOV`）。展开磨砂浮卡直接展示 **5 小时与每周配额流光进度条**、**分段流光上下文条与自动压缩阈值刻度线**、可折叠构成详情与 **Top-3 最重轮次跳转**，底部提供高频快捷按钮（`压缩`、`新对话`、`设置`）。检测到 Obsidian Prism 上下文卡片时自动无痕内嵌其 Shadow DOM，底栏零多余胶囊。
 
 ---
 

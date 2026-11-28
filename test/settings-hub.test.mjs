@@ -265,7 +265,7 @@ test('Settings Hub enforces single-source-of-truth: all 14 module switches appea
     assert.ok(sec.querySelector('[data-testid="ag-sag-hex-logo"]'), 'Hexagon S brand SVG must render');
 
     const tabs = sec.querySelectorAll('[data-ag-sag-subtab]').map((b) => b.getAttribute('data-ag-sag-subtab'));
-    assert.deepEqual(tabs, ['overview', 'ui', 'conversation', 'guard', 'nov', 'advanced']);
+    assert.deepEqual(tabs, ['overview', 'ui', 'conversation', 'guard', 'advanced']);
     assert.equal(api.prismBridge.getActiveSubTab(), 'overview');
 
     const modButtons = sec.querySelectorAll('[data-ag-sag-mod]');
@@ -279,7 +279,7 @@ test('Settings Hub enforces single-source-of-truth: all 14 module switches appea
     assert.ok(cgCard.querySelector('[data-ag-sag-mod="precompactExport"]'));
 
     // Switching to layer tabs must NOT duplicate module switches
-    for (const tab of ['ui', 'conversation', 'guard', 'nov', 'advanced']) {
+    for (const tab of ['ui', 'conversation', 'guard', 'advanced']) {
       sec.querySelector(`[data-ag-sag-subtab="${tab}"]`).click();
       assert.equal(sec.querySelectorAll('[data-ag-sag-mod]').length, 0, `${tab} tab must not repeat module master switches`);
     }
@@ -511,4 +511,131 @@ test('Settings Drawer opens via Ctrl+Alt+, closes via Esc, shares renderHub, ren
     stopPropagation() {},
   });
   assert.equal(doc.querySelector(`[data-testid="${prismBridge.DRAWER_TESTID}"]`), null);
+});
+
+test('Settings Hub & Status Pill polish: thought translation mt hides form, zh-CN has zero jargon/turns, optical vial & no NOV count chip', async () => {
+  const { win, doc, storage } = createHubDom();
+  const footer = doc.createElement('div');
+  footer.className = 'agy-composer-footer';
+  footer.appendChild(doc.createElement('button'));
+  doc.body.appendChild(footer);
+
+  const api = core.mountSag({
+    win,
+    doc,
+    storage,
+    autoPoll: false,
+    autoObserve: false,
+    bindVaultShortcut: false,
+  });
+
+  try {
+    const sec = doc.querySelector(`[data-testid="${prismBridge.NATIVE_SECTION_TESTID}"]`);
+    assert.ok(sec);
+
+    // 1. UI Tab: thought translation engine = mt hides endpoint/model/apikey/style, and row title is distinct from button
+    sec.querySelector('[data-ag-sag-subtab="ui"]').click();
+    assert.equal(sec.querySelector('[data-testid="ag-sag-thought-baseurl"]'), null);
+    assert.equal(sec.querySelector('[data-testid="ag-sag-thought-model"]'), null);
+    assert.equal(sec.querySelector('[data-testid="ag-sag-thought-apikey"]'), null);
+    assert.equal(sec.querySelector('[data-ag-sag-thought-style]'), null);
+    const advThought = sec.querySelector('[data-testid="ag-sag-adv-thought"]');
+    assert.ok(advThought.textContent.includes('连接与缓存'));
+    assert.equal(advThought.textContent.split('测试连接').length - 1, 1);
+    const cssTaPlaceholder = sec.querySelector('[data-testid="ag-sag-theme-css-textarea"]')?.placeholder || '';
+    assert.equal(cssTaPlaceholder.includes(':has('), false);
+
+    // Switch to ollama -> shows baseurl & model, keeps apikey hidden
+    sec.querySelector('[data-ag-sag-thought-engine="ollama"]').click();
+    assert.ok(sec.querySelector('[data-testid="ag-sag-thought-baseurl"]'));
+    assert.ok(sec.querySelector('[data-testid="ag-sag-thought-model"]'));
+    assert.equal(sec.querySelector('[data-testid="ag-sag-thought-apikey"]'), null);
+
+    // Switch to openai -> shows all 3 inputs + style chips
+    sec.querySelector('[data-ag-sag-thought-engine="openai"]').click();
+    assert.ok(sec.querySelector('[data-testid="ag-sag-thought-baseurl"]'));
+    assert.ok(sec.querySelector('[data-testid="ag-sag-thought-model"]'));
+    assert.ok(sec.querySelector('[data-testid="ag-sag-thought-apikey"]'));
+    assert.ok(sec.querySelector('[data-ag-sag-thought-style]'));
+
+    // 2. Conversation Tab: localized zh-CN labels without hardcoded English
+    sec.querySelector('[data-ag-sag-subtab="conversation"]').click();
+    const convText = sec.textContent;
+    assert.equal(convText.includes('Countdown'), false);
+    assert.equal(convText.includes('queued'), false);
+    assert.equal(convText.includes('drafts'), false);
+    assert.ok(convText.includes('倒计时自动'));
+
+    // 3. Guard Tab: quota summary must not mention fake "轮" counts
+    sec.querySelector('[data-ag-sag-subtab="guard"]').click();
+    const guardText = sec.textContent;
+    assert.equal(/\d+\s*轮/.test(guardText), false);
+
+    // 4. Advanced Tab: diagnostics JSON lives collapsed inside <details> with localized summary
+    sec.querySelector('[data-ag-sag-subtab="advanced"]').click();
+    const diagPre = sec.querySelector('[data-testid="ag-sag-diag-pre"]');
+    assert.ok(diagPre);
+    const diagDetails = diagPre.closest('details');
+    assert.equal(diagDetails?.open, false);
+    const diagSumText = diagDetails?.querySelector('summary')?.textContent || '';
+    assert.equal(/\b(drawer|native|prism)\b/.test(diagSumText), false);
+    assert.ok(diagSumText.includes('设置面板'));
+    const storageSum = sec.querySelector('[data-testid="ag-sag-storage-summary"]');
+    assert.ok(storageSum);
+    assert.equal(storageSum.textContent.includes('后台服务未连接'), false);
+    assert.ok(storageSum.textContent.includes('开始检查'));
+
+    // 4b. NOV tab: localized custom preset label & clean Chinese synergy labels
+    // Test thoughtTranslator offline message contains no 'Watch sidecar'
+    const ttMod = require('../packages/core/thought-translator.js');
+    const ttDoc = createHubDom().doc;
+    const tp = ttDoc.createElement('div');
+    tp.setAttribute('data-testid', 'thinking-panel');
+    tp.textContent = 'Thinking in English to check offline fallback behavior';
+    const tb = ttDoc.createElement('button');
+    tb.setAttribute('data-testid', 'thinking-collapsible-trigger');
+    tp.appendChild(tb);
+    ttDoc.body.appendChild(tp);
+    const ttCtl = ttMod.createThoughtTranslatorController({
+      win: { document: ttDoc },
+      doc: ttDoc,
+      enabled: true,
+      autoObserve: false,
+      triggerMode: 'manual',
+      targetLang: 'zh-CN',
+    });
+    const ttRes = await ttCtl.translatePanel(tp);
+    assert.equal(ttRes.ok, false);
+    assert.equal(tp.textContent.includes('Watch sidecar'), false);
+    ttCtl.destroy();
+
+    // 5. Status Pill card: optical vial readout, concise context sub-label & zero NOV x/13 chip
+    api.statusPill?.open?.();
+    const card = doc.querySelector('[data-testid="ag-sg-status-card"]');
+    assert.ok(card);
+    assert.equal(card.hidden, false);
+    const vh = card.querySelector('.ag-sg-vw .ag-sg-vh');
+    assert.ok(vh);
+    assert.ok(vh.textContent.includes('CTX'));
+    assert.equal(card.querySelector('[data-ag-sag-card-metric="nov"]'), null);
+    assert.equal(card.textContent.includes('将于 80% 自动压缩'), false);
+    assert.ok(card.textContent.includes('80% 自动压缩'));
+
+    // 6. Zero user-facing jargon leaks in SAG_UI_PACKS & nov-synergy metadata
+    const i18nMod = require('../packages/core/i18n.js');
+    const jargonRe = /(:has\(|零端口|模型工具|工作区实验室|工作区数据实验室|像素极客|Pixel Geek|Opt-in|Zero-ASAR|Sidecar|0600|force_ask)/i;
+    for (const loc of ['zh-CN', 'zh-TW', 'en']) {
+      for (const [k, v] of Object.entries(i18nMod.SAG_UI_PACKS[loc])) {
+        assert.equal(jargonRe.test(String(v)), false, `SAG_UI_PACKS.${loc}.${k} leaked jargon: ${v}`);
+      }
+    }
+    for (const m of novSynergyMod.NOV_MODULES_META) {
+      assert.equal(jargonRe.test(`${m.nameZh} ${m.descZh} ${m.nameEn} ${m.descEn}`), false, `NOV module ${m.id} leaked jargon`);
+    }
+    for (const p of novSynergyMod.NOV_PRESETS_META) {
+      assert.equal(jargonRe.test(`${p.nameZh} ${p.descZh} ${p.nameEn} ${p.descEn}`), false, `NOV preset ${p.id} leaked jargon`);
+    }
+  } finally {
+    api.destroy();
+  }
 });

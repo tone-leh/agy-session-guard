@@ -4,6 +4,19 @@ All notable changes to **agy-Sag** *(formerly Antigravity Session Guard / 领航
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-29
+
+### Changed & Fixed — Prism-Aligned UX Polish, Real 5h/Weekly Quota & Live Skin Switching
+- **Natural, Jargon-Free Settings Hub (`packages/core/i18n.js`, `packages/core/prism-bridge.js`, `packages/core/settings/tab-*.js`, `packages/core/nov-synergy.js`)**:
+  - Removed top-bar module counters (`9/14 enabled`) and locale chips, removed redundant slogan suffixes on section headers (`界面与外观`, `对话`, `守护`), and eliminated remaining English placeholders/engineering jargon across Overview, UI, Conversation, Guard, `agy-NOV`, and Advanced tabs (including `drawer`/`native` labels, fake `turns` tooltips, and `Watch sidecar` fallback errors).
+  - Hides the standalone `agy-NOV` secondary tab automatically when `agy-NOV` is not installed, surfacing a compact recommendation bar in the UI tab instead; localizes `agy-NOV` custom preset & status labels in Chinese when installed.
+  - Cleaned up `thoughtTranslate` engine UI: removed redundant `(No Key)` label on Machine Translate, hid model/endpoint/key/style fields for `mt`, and tidied the connection/cache row; removed `:has()` from custom CSS placeholder text.
+- **Instant Skin Switching Under Auto Dark/Light Pairing (`packages/core/settings/tab-ui.js`, `packages/core/theme-studio.js`, `packages/core/styles.js`)**:
+  - Clicking any visual look or skin swatch whose color scheme differs from the host now clears `themeAutoPair` so the chosen dark/light skin applies immediately, reinforced with `--sag-sidebar` container styling, fixed `.ag-sag-drawer`/`.ag-sg-status-card` glass selectors, and theme `--sag-theme-accent` synchronization.
+- **Prism-Inspired Optical Quota & Context Card (`packages/core/status-pill.js`, `cli/watch-daemon.mjs`, `packages/core/index.js`, `packages/core/settings/tab-conversation.js`)**:
+  - Connected `RetrieveUserQuotaSummary` over the read-only local Language Server loopback bridge (`sag:quota_summary`, 60s cache) to display live 5-hour & weekly remaining percentages, group switcher (`Gemini` / `Claude & GPT`), and reset countdowns—replacing synthetic turn counts.
+  - Redesigned the floating card with an optical glass context vial (`CTX %` + 80% threshold line), luminous cobalt 5h/weekly quota bars, portal mounting above host stacking contexts, collapsed breakdown details, concise action buttons (`Compact` / `New Chat` / `Settings`), and relocated low-frequency `Export Current Chat` into Settings → Conversation.
+
 ## [1.5.1] - 2026-11-28
 
 ### Fixed

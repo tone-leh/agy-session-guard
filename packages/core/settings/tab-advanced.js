@@ -185,10 +185,6 @@
     };
     const diagWrap = doc.createElement('div');
     diagWrap.className = 'ag-sag-pack-ctrl';
-    const diagPre = doc.createElement('pre');
-    diagPre.className = 'ag-sag-pack-textarea';
-    diagPre.setAttribute('data-testid', 'ag-sag-diag-pre');
-    diagPre.textContent = JSON.stringify(diagObj, null, 2);
     const diagBtns = doc.createElement('div');
     diagBtns.className = 'ag-sag-ext-grid';
     diagBtns.appendChild(
@@ -207,8 +203,26 @@
         },
       })
     );
-    diagWrap.appendChild(diagPre);
+    const diagDetails = doc.createElement('details');
+    diagDetails.className = 'ag-sag-details';
+    const diagSum = doc.createElement('summary');
+    const locLabel = !cfg.hostI18nLocale || cfg.hostI18nLocale === 'auto' ? t('hostI18nAuto', 'Auto Detect') : cfg.hostI18nLocale;
+    const modeLabel = drawerOpen
+      ? t('advDiagModeDrawer', 'Drawer')
+      : mountedMode === 'prism'
+        ? t('advDiagModePrism', 'Embedded')
+        : mountedMode === 'native'
+          ? t('advDiagModeNative', 'Settings Panel')
+          : t('advDiagModeNone', 'Background');
+    diagSum.textContent = `${locLabel} · ${modeLabel}`;
+    const diagPre = doc.createElement('pre');
+    diagPre.className = 'ag-sag-pack-textarea';
+    diagPre.setAttribute('data-testid', 'ag-sag-diag-pre');
+    diagPre.textContent = JSON.stringify(diagObj, null, 2);
+    diagDetails.appendChild(diagSum);
+    diagDetails.appendChild(diagPre);
     diagWrap.appendChild(diagBtns);
+    diagWrap.appendChild(diagDetails);
     pane.appendChild(mkSuiteRow(t('advDiagLabel', 'Diagnostics'), t('advDiagDesc', ''), diagWrap, { stacked: true, searchExtra: 'diagnostics debug' }));
 
     // 5. Read-Only Local Storage Audit (zero-port Watch Bridge -> storage-doctor)
@@ -275,20 +289,20 @@
     if (uiState.storageAuditState?.status === 'ok' && uiState.storageAuditState.data) {
       const d = uiState.storageAuditState.data;
       stNote.textContent = i18n.formatTemplate(
-        t('advStorageSummary', 'Total {total} ({files} files) · {sessions} brain · {convs} chats · WAL {wal} · {orphans} orphans'),
+        t('advStorageSummary', 'Total {total} ({files} files) · {sessions} sessions · {convs} chats · DB {wal} · {orphans} leftover'),
         {
           total: formatStorageBytes(d.totalBytes),
           files: d.totalFiles ?? 0,
           sessions: d.brainSessionCount ?? 0,
           convs: d.conversationCount ?? 0,
-          wal: d.walActive ? t('advStorageWalActive', 'Active Lock') : t('advStorageWalSafe', 'Idle'),
+          wal: d.walActive ? t('advStorageWalActive', 'In Use') : t('advStorageWalSafe', 'Idle'),
           orphans: d.orphanCount ?? 0,
         }
       );
     } else if (uiState.storageAuditState?.message) {
       stNote.textContent = uiState.storageAuditState.message;
     } else {
-      stNote.textContent = t('advStorageOffline', 'node cli/sag-cli.mjs storage audit');
+      stNote.textContent = t('advStorageIdleHint', 'Click "Audit Storage" to inspect local cache usage (read-only)');
     }
     stWrap.appendChild(stNote);
     pane.appendChild(

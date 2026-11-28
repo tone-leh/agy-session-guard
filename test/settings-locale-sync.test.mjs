@@ -238,18 +238,17 @@ test('settings-locale-sync: switching host locale to ru (with translated heading
     guard.prismBridge.setActiveSubTab('ui');
     guard.prismBridge.sync();
 
-    const badge = doc.querySelector('[data-testid="ag-sag-lang-badge"]');
     const sel = doc.querySelector('[data-testid="ag-sag-host-locale-select"]');
-    assert.ok(badge, 'Settings language badge must remain mounted');
+    assert.equal(doc.querySelector('[data-testid="ag-sag-lang-badge"]'), null, 'Top bar must not show redundant language badge');
     assert.ok(sel, 'Settings host locale select must remain mounted');
-    assert.equal(badge.textContent, 'ru');
+    assert.equal(doc.documentElement.getAttribute('data-ag-sag-lang'), 'ru');
     assert.equal(sel.value, 'ru');
 
     // Even if a custom pack translates <h2> into an arbitrary unknown heading, already-mounted section continues syncing
     h2.textContent = 'Custom Heading Text';
     guard.setHostLocale('pt-BR');
     guard.prismBridge.sync();
-    assert.equal(doc.querySelector('[data-testid="ag-sag-lang-badge"]')?.textContent, 'pt-BR');
+    assert.equal(doc.documentElement.getAttribute('data-ag-sag-lang'), 'pt-BR');
     assert.equal(doc.querySelector('[data-testid="ag-sag-host-locale-select"]')?.value, 'pt-BR');
   } finally {
     guard.destroy();

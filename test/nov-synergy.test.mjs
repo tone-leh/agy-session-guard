@@ -536,7 +536,12 @@ test('3. Four Dual-Star Synergy Effects: dual-shield, context-memory, radar-dedu
   assert.equal(byIdB['radar-dedup'], undefined);
   assert.equal(byIdB['dual-star-hub'].enabledCount, 5);
   assert.equal(byIdB['dual-star-hub'].totalModules, 13);
-  assert.ok(byIdB['dual-star-hub'].descEn.includes('5/13 modules ON'));
+  assert.ok(byIdB['dual-star-hub'].descEn.includes('agy-NOV'));
+  assert.ok(byIdB['dual-star-hub'].descEn.includes('connected'));
+  assert.equal(byIdB['dual-star-hub'].descEn.includes('/13'), false);
+  assert.equal(byIdB['dual-star-hub'].descZh.includes('/13'), false);
+  assert.equal(byIdB['dual-star-hub'].descZh.includes('零端口'), false);
+  assert.equal(byIdB['dual-star-hub'].descZh.includes('模型工具'), false);
 
   // Case C: legacy 9-key state fallback & v0.5.0 verify/spec synergy awareness
   const normalizedLegacy = novSynergyMod.normalizeNovState({
@@ -665,6 +670,9 @@ test('4. Native-grade settings hub: collapsible header, 5 SubTabs, 9 agy-NOV swi
       nativeSec.querySelector('[data-ag-synergy-id="context-memory"]').getAttribute('data-status'),
       'active'
     );
+    const metaEl = nativeSec.querySelector('[data-testid="ag-sag-nov-meta"]');
+    assert.ok(metaEl);
+    assert.equal(/\bcustom\b/.test(metaEl.textContent), false, `Must localize preset label instead of raw "custom": ${metaEl.textContent}`);
 
     // 1-click synergy action: disable duplicate agy-Sag sessionRadar
     const dedupBtn = nativeSec.querySelector('[data-ag-synergy-action="disable-sag-module"][data-ag-synergy-target="sessionRadar"]');
@@ -750,7 +758,8 @@ test('5. Uninstalled agy-NOV fallback: renders companion recommendation card wit
     assert.equal(nativeSec.textContent.includes('Prism'), false);
     assert.equal(nativeSec.querySelector('[data-testid="ag-sag-dual-star-pill"]'), null);
 
-    nativeSec.querySelector('[data-ag-sag-subtab="nov"]').click();
+    assert.equal(nativeSec.querySelector('[data-ag-sag-subtab="nov"]'), null, 'Uninstalled agy-NOV must not occupy a standalone secondary tab');
+    nativeSec.querySelector('[data-ag-sag-subtab="ui"]').click();
     const promo = nativeSec.querySelector('[data-testid="ag-sag-nov-promo"]');
     assert.ok(promo, 'Must render companion recommendation card when agy-NOV is not installed');
     const cmdEl = promo.querySelector('[data-testid="ag-sag-nov-install-cmd"]');
@@ -823,9 +832,10 @@ test('6. Regression [H-2 & L-2]: late host bridge attachment auto-refreshes when
 
     const nativeSec = doc.querySelector(`[data-testid="${prismBridge.NATIVE_SECTION_TESTID}"]`);
     assert.ok(nativeSec);
-    // Switching to nov subtab auto-triggers refresh once bridge is available
-    nativeSec.querySelector('[data-ag-sag-subtab="nov"]').click();
+    // Opening UI tab auto-triggers discovery once late bridge becomes available, revealing nov tab when installed
+    nativeSec.querySelector('[data-ag-sag-subtab="ui"]').click();
     await new Promise((r) => setTimeout(r, 20));
+    nativeSec.querySelector('[data-ag-sag-subtab="nov"]')?.click();
 
     assert.equal(refreshCalls, 1, 'Opening nov tab must trigger single auto-refresh once late bridge becomes available');
     assert.equal(api.novSynergy.getState().bridgeConnected, true);
