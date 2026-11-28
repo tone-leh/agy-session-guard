@@ -14,13 +14,93 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { buildInjectExpression, REMOVE_EXPRESSION } from './bundle.mjs';
-import { isCliEntry } from './platform-utils.mjs';
+import { assertNoSymlinkAncestors, expandTildePath, isCliEntry } from './platform-utils.mjs';
 
 const require = createRequire(import.meta.url);
 const coexist = require('../packages/core/coexist.js');
 
 const ALLOWED_PRESETS = Object.keys(coexist.PRESETS || {});
 const ALLOWED_HOST_LOCALES = Array.isArray(coexist.ALLOWED_HOST_LOCALES) ? coexist.ALLOWED_HOST_LOCALES : [];
+const ALLOWED_MODULE_KEYS = new Set(Object.keys(coexist.DEFAULT_CONFIG?.modules || {}));
+const ALLOWED_LOCAL_CONFIG_KEYS = new Set(
+  Object.keys(coexist.DEFAULT_CONFIG || {}).filter((k) => k !== 'modules' && k !== 'themeCustomCss')
+);
+
+export function resolveLocalSagConfigPath({
+  platform = process.platform,
+  homeDir = os.homedir(),
+  env = process.env,
+  explicitPath = null,
+} = {}) {
+  if (explicitPath) {
+    return path.resolve(expandTildePath(String(explicitPath), homeDir));
+  }
+  const resolvedHome = path.resolve(String(homeDir || os.homedir()));
+  if (platform === 'win32') {
+    const appData = env?.APPDATA || env?.appdata || path.win32.join(resolvedHome, 'AppData', 'Roaming');
+    const winCandidate = path.win32.join(appData, 'agy-sag', 'config.json');
+    if (fs.existsSync(winCandidate)) return winCandidate;
+    return path.join(resolvedHome, '.config', 'agy-sag', 'config.json');
+  }
+  const xdg = typeof env?.XDG_CONFIG_HOME === 'string' && env.XDG_CONFIG_HOME.trim()
+    ? expandTildePath(env.XDG_CONFIG_HOME.trim(), resolvedHome)
+    : path.join(resolvedHome, '.config');
+  return path.join(path.resolve(xdg), 'agy-sag', 'config.json');
+}
+
+export function readLocalSagConfig(opts = {}) {
+  const filePath = resolveLocalSagConfigPath(opts);
+  try {
+    const st = fs.lstatSync(filePath);
+    if (!st || st.isSymbolicLink() || !st.isFile() || st.size <= 0 || st.size > 64 * 1024) {
+      return null;
+    }
+    assertNoSymlinkAncestors(path.resolve(filePath));
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const clean = {};
+    for (const key of Object.keys(parsed)) {
+      if (!ALLOWED_LOCAL_CONFIG_KEYS.has(key)) continue;
+      const val = parsed[key];
+      if (typeof val === 'string' || typeof val === 'boolean' || (typeof val === 'number' && Number.isFinite(val))) {
+        clean[key] = val;
+      }
+    }
+    if (parsed.modules && typeof parsed.modules === 'object' && !Array.isArray(parsed.modules)) {
+      const mods = {};
+      for (const [mk, mv] of Object.entries(parsed.modules)) {
+        if (ALLOWED_MODULE_KEYS.has(mk) && typeof mv === 'boolean') {
+          mods[mk] = mv;
+        }
+      }
+      if (Object.keys(mods).length > 0) clean.modules = mods;
+    }
+    return Object.keys(clean).length > 0 ? clean : null;
+  } catch {
+    return null;
+  }
+}
+
+export function mergeMigratedConfigPatch(cliPatch = {}, localCfg = null) {
+  if (!localCfg || typeof localCfg !== 'object') {
+    return cliPatch && typeof cliPatch === 'object' ? { ...cliPatch } : {};
+  }
+  const base = { ...localCfg };
+  const cli = cliPatch && typeof cliPatch === 'object' ? cliPatch : {};
+  const merged = { ...base, ...cli };
+  if (base.modules || cli.modules) {
+    const mergedMods = { ...(base.modules || {}), ...(cli.modules || {}) };
+    // Preserve explicit user-migrated opt-in modules (e.g. thoughtTranslate / themeStudio) when a preset defaults them to false
+    if (base.modules?.thoughtTranslate === true && mergedMods.thoughtTranslate === false) {
+      mergedMods.thoughtTranslate = true;
+    }
+    if (base.modules?.themeStudio === true && mergedMods.themeStudio === false) {
+      mergedMods.themeStudio = true;
+    }
+    merged.modules = mergedMods;
+  }
+  return merged;
+}
 
 export function validatePresetName(raw, flagText = `--preset=${raw}`) {
   const val = String(raw ?? '').trim().toLowerCase();
@@ -417,7 +497,12 @@ export async function runCdpAttachCli(argv = process.argv.slice(2), deps = {}) {
   const targets = await listFn(port);
   const hostPages = (Array.isArray(targets) ? targets : []).filter((t) => isAntigravityHostTarget(t, { expectedPort: port }));
 
-  const cfgPatch = buildConfigPatchFromOpts(opts);
+  const rawCliPatch = buildConfigPatchFromOpts(opts);
+  const isMockedCall = Boolean(deps.discoverPort || deps.listTargets || deps.evalTarget);
+  const shouldLoadLocal =
+    deps.loadLocalConfig === true || (deps.loadLocalConfig !== false && !isMockedCall);
+  const localCfg = shouldLoadLocal ? readLocalSagConfig({ explicitPath: deps.localConfigPath || null }) : null;
+  const cfgPatch = mergeMigratedConfigPatch(rawCliPatch, localCfg);
 
   if (opts.dryRun) {
     const out = {
@@ -452,7 +537,7 @@ export async function runCdpAttachCli(argv = process.argv.slice(2), deps = {}) {
         ? '(() => (window.__agSag || window.__agSessionGuard)?.getDebugState?.() || { mounted: false })()'
         : buildInjectExpression(Object.keys(cfgPatch).length ? cfgPatch : null, {
             source: 'standalone',
-            extLocale: opts.lang || null,
+            extLocale: opts.lang || cfgPatch.hostI18nLocale || null,
           });
 
   const results = [];

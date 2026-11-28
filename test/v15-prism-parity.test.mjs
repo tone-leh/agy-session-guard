@@ -19,7 +19,14 @@ import {
   validateProxyUrl,
 } from '../cli/translator-service.mjs';
 import { buildInjectExpression } from '../cli/bundle.mjs';
-import { isAntigravityHostTarget, isAntigravitySwarmTarget, selectSwarmTargets } from '../cli/cdp-attach.mjs';
+import {
+  buildConfigPatchFromOpts,
+  isAntigravityHostTarget,
+  isAntigravitySwarmTarget,
+  mergeMigratedConfigPatch,
+  readLocalSagConfig,
+  selectSwarmTargets,
+} from '../cli/cdp-attach.mjs';
 import { readLocalTelemetrySnapshot } from '../cli/storage-doctor.mjs';
 import {
   applyPrismMigration,
@@ -780,4 +787,58 @@ test('7. v1.5 Security audit hardening: hanging proxy stream timeout, proxy cred
   vm.runInNewContext(expr, sb, { timeout: 3000 });
   assert.equal(Object.isFrozen(sb.__agSgCoexist.PRESETS.essential.modules), true, 'Nested frozen config objects must remain frozen after bundle unpack');
   sb.__agSag?.destroy?.();
+});
+
+test('8. v1.5 Migrated local config auto-loading: whitelist filtering, symlink rejection & preset merge preservation', async () => {
+  await withTempDirAsync(async (tmp) => {
+    const cfgPath = path.join(tmp, 'config.json');
+    fs.writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        version: 1,
+        migratedFrom: 'obsidian-prism',
+        apiKey: 'sk-should-be-dropped',
+        themeCustomCss: 'body { display: none; }',
+        hostI18nLocale: 'zh-CN',
+        themePreset: 'obsidian-prism',
+        themeSmoothCaret: true,
+        thoughtEngine: 'openai',
+        thoughtViewMode: 'bilingual',
+        thoughtTranslateTitles: true,
+        thoughtStylePreset: 'technical',
+        modules: {
+          hostI18n: true,
+          themeStudio: true,
+          thoughtTranslate: true,
+          unknownModule: true,
+        },
+      })
+    );
+
+    const loaded = readLocalSagConfig({ explicitPath: cfgPath });
+    assert.ok(loaded);
+    assert.equal(loaded.apiKey, undefined, 'Non-whitelisted keys must be stripped');
+    assert.equal(loaded.themeCustomCss, undefined, 'themeCustomCss must not be auto-loaded from migrated config');
+    assert.equal(loaded.themePreset, 'obsidian-prism');
+    assert.equal(loaded.thoughtEngine, 'openai');
+    assert.equal(loaded.modules.thoughtTranslate, true);
+    assert.equal(loaded.modules.unknownModule, undefined);
+
+    const powerPatch = buildConfigPatchFromOpts({ preset: 'power' });
+    const merged = mergeMigratedConfigPatch(powerPatch, loaded);
+    assert.equal(merged.hostI18nLocale, 'zh-CN');
+    assert.equal(merged.themePreset, 'obsidian-prism');
+    assert.equal(merged.thoughtEngine, 'openai');
+    assert.equal(merged.modules.thoughtTranslate, true, 'Migrated thoughtTranslate=true must survive --preset=power');
+    assert.equal(merged.modules.promptLibrary, true, 'Preset modules must still apply');
+
+    const langOverride = mergeMigratedConfigPatch(buildConfigPatchFromOpts({ preset: 'power', lang: 'ja' }), loaded);
+    assert.equal(langOverride.hostI18nLocale, 'ja', 'Explicit CLI --lang must override migrated locale');
+
+    if (process.platform !== 'win32') {
+      const symPath = path.join(tmp, 'sym-config.json');
+      fs.symlinkSync(cfgPath, symPath);
+      assert.equal(readLocalSagConfig({ explicitPath: symPath }), null, 'Symlink config must be rejected fail-closed');
+    }
+  });
 });

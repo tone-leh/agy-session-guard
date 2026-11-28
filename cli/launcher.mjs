@@ -21,6 +21,8 @@ import {
   buildConfigPatchFromOpts,
   discoverCdpPort,
   httpGetJson,
+  mergeMigratedConfigPatch,
+  readLocalSagConfig,
   validateHostLang,
   validatePresetName,
 } from './cdp-attach.mjs';
@@ -2173,7 +2175,12 @@ export function applyPrismMigration({
 
 export async function runKeepaliveCli(argv = [], deps = {}) {
   const opts = parseLauncherArgs(argv);
-  const cfgPatch = buildConfigPatchFromOpts(opts);
+  const rawCliPatch = buildConfigPatchFromOpts(opts);
+  const isMockedCall = Boolean(deps.listTargets || deps.evalTarget || deps.spawnFn || deps.execFileFn || deps.discoverPort);
+  const shouldLoadLocal =
+    deps.loadLocalConfig === true || (deps.loadLocalConfig !== false && !isMockedCall);
+  const localCfg = shouldLoadLocal ? readLocalSagConfig({ explicitPath: deps.localConfigPath || null }) : null;
+  const cfgPatch = mergeMigratedConfigPatch(rawCliPatch, localCfg);
   const out = deps.out || { stdout: (s) => console.log(s), stderr: (s) => console.error(s) };
 
   const controller = new SagKeepaliveController({

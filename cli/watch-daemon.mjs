@@ -32,6 +32,8 @@ import {
   isAntigravityHostTarget,
   isAntigravityHostUrl,
   isLoopbackWsUrl,
+  mergeMigratedConfigPatch,
+  readLocalSagConfig,
   validateHostLang,
   validatePresetName,
 } from './cdp-attach.mjs';
@@ -1547,9 +1549,12 @@ export class SagWatchDaemon {
 
 export const SessionGuardWatchDaemon = SagWatchDaemon; // legacy alias
 
-export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
+export async function startWatchDaemonCli(argv = process.argv.slice(2), deps = {}) {
   const opts = parseWatchArgs(argv);
-  const cfgPatch = buildConfigPatchFromOpts(opts);
+  const rawCliPatch = buildConfigPatchFromOpts(opts);
+  const localCfg =
+    deps.loadLocalConfig === false ? null : readLocalSagConfig({ explicitPath: deps.localConfigPath || null });
+  const cfgPatch = mergeMigratedConfigPatch(rawCliPatch, localCfg);
 
   const formatLog = (ev) => {
     if (opts.json) {
