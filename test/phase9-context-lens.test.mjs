@@ -187,10 +187,11 @@ test('Phase 9: sessionWatchdog records lastTurnElapsedSec on stream completion &
     assert.equal(u1.scrolledIntoView, true, 'Clicking top turn chip must scroll bubble into view');
 
     sp.open();
-    const expBtn = doc.querySelector('[data-ag-sg-card-act="export-md"]');
-    assert.ok(expBtn);
-    expBtn.click();
-    assert.equal(exported, 1, 'Export MD action must invoke callback');
+    assert.equal(
+      doc.querySelector('[data-ag-sg-card-act="export-md"]'),
+      null,
+      'Low-frequency Export MD must not clutter primary status card footer'
+    );
   } finally {
     sp.destroy();
   }

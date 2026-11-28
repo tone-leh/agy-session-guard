@@ -281,6 +281,21 @@
       })
     );
     pane.appendChild(plDetails);
+
+    if (typeof options.onExportSession === 'function') {
+      pane.appendChild(
+        mkSuiteRow(
+          t('convExportChatLabel', 'Export Current Chat'),
+          t('convExportChatDesc', 'Download a redacted Markdown copy of this conversation.'),
+          mkChip({
+            label: t('cardExportMdBtn', 'Export MD'),
+            testId: 'ag-sag-conv-export-md-btn',
+            onClick: () => options.onExportSession(),
+          }),
+          { searchExtra: 'export markdown chat archive download' }
+        )
+      );
+    }
   }
 
   return { renderConversationTab };

@@ -97,6 +97,30 @@
     let thoughtTranslator = null;
     const quotaBySession = new Map();
 
+    let quotaSummary = null;
+    let lastQuotaSummaryAtMs = 0;
+    let quotaSummaryInflight = false;
+
+    const refreshQuotaSummary = () => {
+      if (destroyed || options.novTransport || !novSynergy?.isBridgeAvailable?.()) return;
+      const nowMs = Date.now();
+      if (quotaSummaryInflight || (lastQuotaSummaryAtMs > 0 && nowMs - lastQuotaSummaryAtMs < 60000)) return;
+      quotaSummaryInflight = true;
+      lastQuotaSummaryAtMs = nowMs;
+      Promise.resolve(novSynergy.requestRaw?.('sag:quota_summary', {}))
+        .then((res) => {
+          const data = res?.raw?.data ?? res?.data ?? null;
+          if (!destroyed && res?.ok && data && typeof data === 'object') {
+            quotaSummary = data;
+            syncStatusPill();
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          quotaSummaryInflight = false;
+        });
+    };
+
     const openVault = () => bookmarkVault?.open?.();
     const syncStatusPill = () => {
       if (!statusPill) return;
@@ -117,6 +141,7 @@
         hasDraft: Boolean(dgState?.barVisible || (dgState?.savedDraftCount || 0) > 0),
         queue: pqState ? { itemCount: pqState.itemCount || 0, paused: Boolean(pqState.paused) } : null,
         quota: qpState,
+        quotaSummary,
         autoAccept: aaState
           ? { enabled: Boolean(aaState.enabled), paused: Boolean(aaState.paused), dryRun: Boolean(aaState.dryRun) }
           : null,
@@ -681,6 +706,7 @@
               localTelemetryFetched = true;
               const t = setTimeout(() => {
                 if (destroyed || !novSynergy?.isBridgeAvailable?.()) return;
+                refreshQuotaSummary();
                 const cid = ctxSourceMod?.detectCascadeId?.(doc, win) || '';
                 Promise.resolve(novSynergy.requestRaw?.('sag:telemetry_snapshot', { cascadeId: cid }))
                   .then((res) => {
@@ -786,10 +812,9 @@
           onUpdateConfig: (patch) => api.updateConfig(patch),
           onCompactNow: () => compactGuard.insertCompact({ submit: true }),
           onCleanRestart: (opts) => cleanSlate?.triggerCleanClear?.(opts),
-          onExportSession: () => compactGuard.exportMarkdown?.({ download: true }),
+          onRequestQuotaRefresh: () => refreshQuotaSummary(),
           onOpenVault: openVault,
           onOpenSettings: (tabId) => prismBridge?.openDrawer?.(tabId),
-          onOpenShortcuts: () => prismBridge?.openShortcutSheet?.(),
         })
       : null;
 
@@ -913,6 +938,7 @@
           onTranslatorClearCache: () => callTranslatorBridge('sag:translate_clear_cache', {}),
           onTranslatorSaveConfig: (req) => callTranslatorBridge('sag:translate_save_config', req),
           onTestRadarAudio: () => sessionRadar?.testAudioAlert?.(),
+          onExportSession: () => compactGuard.exportMarkdown?.({ download: true }),
           onExportPromptSnippets: () => promptLibrary?.exportSnippetsJson?.() || '{"version":1,"snippets":[]}',
           onImportPromptSnippets: (raw) => promptLibrary?.importSnippetsJson?.(raw) || { ok: false, errors: ['Prompt Library unavailable'] },
           onOpenVault: (q) => openVault(q),

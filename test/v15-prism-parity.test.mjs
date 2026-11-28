@@ -33,7 +33,7 @@ import {
   buildLaunchAgentPlist,
   inspectPrismMigration,
 } from '../cli/launcher.mjs';
-import { SagWatchDaemon } from '../cli/watch-daemon.mjs';
+import { SagWatchDaemon, fetchLocalQuotaSummary, normalizeLocalQuotaSummary } from '../cli/watch-daemon.mjs';
 
 const require = createRequire(import.meta.url);
 const coexist = require('../packages/core/coexist.js');
@@ -846,5 +846,105 @@ test('8. v1.5 Migrated local config auto-loading: whitelist filtering, symlink r
   const stylesMod = require('../packages/core/styles.js');
   assert.match(stylesMod.CORE_CSS, /\.ag-sg-card-foot\{[^}]*flex-wrap:\s*wrap/i);
   assert.match(stylesMod.CORE_CSS, /\.ag-sg-status-card\{[^}]*width:min\(316px/i);
-  assert.match(stylesMod.CORE_CSS, /\.ag-sag-meters\{/i);
+  assert.match(stylesMod.CORE_CSS, /\.ag-sag-qrow\{/i);
+});
+
+test('9. v1.5 Official local LS RetrieveUserQuotaSummary (real 5h & weekly remaining %, 60s cache, Prism-style card, no fake turns & no card Export)', async () => {
+  const nowMs = Date.parse('2026-11-28T15:00:00Z');
+  const sampleRaw = {
+    response: {
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [
+            { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 0.2865, resetTime: '2026-12-03T06:00:00Z' },
+            { bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.9662, resetTime: '2026-11-28T19:55:00Z' },
+          ],
+        },
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [
+            { bucketId: '3p-weekly', window: 'weekly', remainingFraction: 0.2916, resetTime: '2026-11-30T15:00:00Z' },
+            { bucketId: '3p-5h', window: '5h', remainingFraction: 1 },
+          ],
+        },
+      ],
+    },
+  };
+
+  // 9a. Normalization & loopback-only guard
+  const norm = normalizeLocalQuotaSummary(sampleRaw, nowMs);
+  assert.equal(norm.available, true);
+  assert.equal(norm.groups.length, 2);
+  assert.equal(norm.groups[0].id, 'gemini');
+  assert.equal(norm.groups[0].fiveHour.remainingPct, 97);
+  assert.equal(norm.groups[0].weekly.remainingPct, 29);
+  assert.equal(norm.groups[1].id, 'claude');
+  assert.equal(norm.groups[1].fiveHour.remainingPct, 100);
+
+  const blockedRemote = await fetchLocalQuotaSummary({
+    lsAddress: 'evil.example.com:5387',
+    csrfToken: 'tok',
+    fetchFn: async () => { throw new Error('must not fetch remote'); },
+  });
+  assert.equal(blockedRemote.available, false);
+  assert.equal(blockedRemote.reason, 'non-loopback');
+
+  // 9b. WatchDaemon sag:quota_summary 60s cache
+  let calls = 0;
+  let clock = nowMs;
+  const daemon = new SagWatchDaemon({
+    port: 9222,
+    enableHostBridge: false,
+    now: () => clock,
+    fetchQuotaSummary: async () => {
+      calls += 1;
+      return norm;
+    },
+  });
+  const r1 = await daemon._handleHostBridgePayload(JSON.stringify({ reqId: 'q1', type: 'sag:quota_summary', payload: {} }));
+  const r2 = await daemon._handleHostBridgePayload(JSON.stringify({ reqId: 'q2', type: 'sag:quota_summary', payload: {} }));
+  assert.equal(r1.ok, true);
+  assert.equal(r2.ok, true);
+  assert.equal(calls, 1, '60s cache must deduplicate quota summary calls');
+  assert.equal(r1.data.groups[0].fiveHour.remainingPct, 97);
+
+  // 9c. StatusPill card renders real remaining 5h & weekly % with group switcher, zero turn counts, and zero Export button
+  const { doc, win, makeEl } = createMiniDom();
+  const footer = makeEl('div');
+  footer.className = 'agy-composer-footer';
+  doc.body.appendChild(footer);
+  const sp = statusPillMod.createStatusPillController({
+    win,
+    doc,
+    coexist,
+    getLang: () => 'zh-CN',
+    getConfig: () => ({
+      ...coexist.DEFAULT_CONFIG,
+      modules: { ...coexist.DEFAULT_CONFIG.modules, quotaPulse: true },
+    }),
+    onCompactNow: () => {},
+    onCleanRestart: () => {},
+    onOpenSettings: () => {},
+  });
+  try {
+    sp.sync({
+      snap: { usedPct: 12, usedTokens: 61440, maxTokens: 512000 },
+      quotaSummary: norm,
+    });
+    sp.open();
+    const card = doc.querySelector('[data-testid="ag-sg-status-card"]');
+    assert.ok(card && !card.hidden);
+    assert.ok(card.textContent.includes('97%'), 'Must display real 5h remaining 97%');
+    assert.ok(card.textContent.includes('29%'), 'Must display real weekly remaining 29%');
+    assert.ok(card.textContent.includes('4h55m'), 'Must display 5h reset countdown');
+    assert.equal(card.textContent.includes('/60'), false, 'Must never display fake turn counts');
+    assert.equal(card.querySelector('[data-ag-sg-card-act="export-md"]'), null, 'Card footer must not contain low-frequency Export');
+    const claudeTab = card.querySelector('[data-ag-sag-qgroup="claude"]');
+    assert.ok(claudeTab, 'Must render Claude / GPT group switch tab');
+    claudeTab.click();
+    assert.ok(card.textContent.includes('100%'), 'Switching to Claude / GPT tab must show 100% 5h remaining');
+  } finally {
+    sp.destroy();
+  }
 });

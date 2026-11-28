@@ -75,11 +75,49 @@
     return Math.max(0, Math.round(ratio * 100));
   }
 
+  function pickActiveQuotaGroup(groups, modelText = '', selectedId = '') {
+    if (!Array.isArray(groups) || groups.length === 0) return null;
+    if (selectedId) {
+      const hit = groups.find((g) => g && (g.id === selectedId || g.shortName === selectedId));
+      if (hit) return hit;
+    }
+    const ml = String(modelText || '').toLowerCase();
+    if (/argon/i.test(ml)) {
+      const a = groups.find((g) => g && g.id === 'argon');
+      if (a) return a;
+    }
+    if (/claude|anthropic|sonnet|opus|haiku|gpt|openai/i.test(ml)) {
+      const c = groups.find((g) => g && g.id === 'claude');
+      if (c) return c;
+    }
+    return groups.find((g) => g && g.id === 'gemini') || groups[0] || null;
+  }
+
+  function formatResetDurationMs(ms) {
+    const val = Number(ms);
+    if (!Number.isFinite(val) || val <= 0) return '';
+    const s = Math.max(1, Math.round(val / 1000));
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (d > 0) return h > 0 ? `${d}d${h}h` : `${d}d`;
+    if (h > 0) return m > 0 ? `${h}h${m}m` : `${h}h`;
+    return `${Math.max(1, m)}m`;
+  }
+
+  function remainingTone(pct) {
+    if (pct <= 15) return 'danger';
+    if (pct <= 35) return 'warn';
+    return 'ok';
+  }
+
   function computeHudSegments({
     cfg = {},
     snap = null,
     watchdog = null,
     quota = null,
+    quotaSummary = null,
+    activeModel = '',
     queue = null,
     bookmarkCount = 0,
     autoAccept = null,
@@ -133,22 +171,44 @@
       }
     }
 
-    // 3. quota segment
-    if (mods.quotaPulse && quota) {
+    // 3. quota segment — prefer official local LS remaining % over local estimate
+    const liveGroups = Array.isArray(quotaSummary?.groups) ? quotaSummary.groups : [];
+    const activeGroup = mods.quotaPulse ? pickActiveQuotaGroup(liveGroups, activeModel) : null;
+    if (activeGroup && (activeGroup.fiveHour || activeGroup.weekly)) {
+      const b5 = activeGroup.fiveHour;
+      const bw = activeGroup.weekly;
+      const mainBucket = b5 || bw;
+      const remPct = Math.max(0, Math.min(100, Math.round(Number(mainBucket.remainingPct ?? (Number(mainBucket.remainingFraction) * 100)) || 0)));
+      const minPct = Math.min(
+        b5 ? Number(b5.remainingPct ?? 100) : 100,
+        bw ? Number(bw.remainingPct ?? 100) : 100
+      );
+      const parts = [activeGroup.shortName || activeGroup.displayName];
+      if (b5) parts.push(`5h ${b5.remainingPct}%${b5.resetInMs > 0 ? ` (${formatResetDurationMs(b5.resetInMs)})` : ''}`);
+      if (bw) parts.push(`7d ${bw.remainingPct}%${bw.resetInMs > 0 ? ` (${formatResetDurationMs(bw.resetInMs)})` : ''}`);
+      segs.push({
+        id: 'quota',
+        text: `${b5 ? '5h' : '7d'} ${remPct}%`,
+        tone: remainingTone(minPct),
+        title: parts.join(' · '),
+      });
+    } else if (mods.quotaPulse && quota) {
       const qPct = computeQuotaPct(quota);
       const turns5h = Number(quota.localEstimate?.turns5h) || 0;
       const soft5h = Number(quota.limits?.softTurns5h) || 60;
       const turns7d = Number(quota.localEstimate?.turns7d) || 0;
       const soft7d = Number(quota.limits?.softTurns7d) || 350;
-      segs.push({
-        id: 'quota',
-        text: `5h ${qPct}%`,
-        tone: QUOTA_TONE_MAP[quota.health] || 'ok',
-        title: formatTpl(
-          strings.hudQuotaTitle || 'Quota Pulse · 5h {turns5h}/{soft5h} turns · 7d {turns7d}/{soft7d} turns (local estimate, read-only)',
-          { turns5h, soft5h, turns7d, soft7d }
-        ),
-      });
+      if (quota.observed?.rateLimited || quota.observed?.observedPct !== null || turns5h > 0) {
+        segs.push({
+          id: 'quota',
+          text: `5h ${qPct}%`,
+          tone: QUOTA_TONE_MAP[quota.health] || 'ok',
+          title: formatTpl(
+            strings.hudQuotaTitle || 'Quota Pulse · 5h {turns5h}/{soft5h} · 7d {turns7d}/{soft7d}',
+            { turns5h, soft5h, turns7d, soft7d }
+          ),
+        });
+      }
     }
 
     // 4. queue segment
@@ -282,6 +342,7 @@
     let embeddedShadowHosts = new Set();
     let lastSegments = [];
     let lastBreakdownCache = null;
+    let selectedQuotaGroupId = '';
     let lastState = {
       snap: null,
       watchdog: null,
@@ -289,6 +350,7 @@
       hasDraft: false,
       queue: null,
       quota: null,
+      quotaSummary: null,
       autoAccept: null,
       nov: null,
       synergyConnected: false,
@@ -394,12 +456,26 @@
       };
     }
 
+    function detectActiveModelLabel() {
+      try {
+        const scope = getScope();
+        const el =
+          scope?.querySelector?.('[data-testid="model-selector-trigger"]') ||
+          doc?.querySelector?.('[data-testid="model-selector-trigger"]');
+        return String(el?.getAttribute?.('aria-label') || el?.textContent || '').trim();
+      } catch {
+        return '';
+      }
+    }
+
     function getCurrentSegments(cfg, strings) {
       return computeHudSegments({
         cfg,
         snap: lastState.snap,
         watchdog: lastState.watchdog,
         quota: lastState.quota,
+        quotaSummary: lastState.quotaSummary,
+        activeModel: detectActiveModelLabel(),
         queue: lastState.queue,
         bookmarkCount: lastState.bookmarkCount,
         autoAccept: lastState.autoAccept,
@@ -566,61 +642,100 @@
       head.appendChild(metaWrap);
       cardEl.appendChild(head);
 
-      // 2. Primary visual focus: 3 clean horizontal meters (5h Quota, Weekly Quota, Context)
-      const meters = mk('div', 'ag-sag-meters');
-      const turnsUnit = sagStr.cardTurnsUnit || 'turns';
+      // 2. Model Quota section (Prism-aligned: real 5h & weekly remaining % + reset countdown, zero fake turn counts)
+      if (mods.quotaPulse) {
+        const qSec = mk('section', 'ag-sag-qsec', undefined, { 'data-testid': 'ag-sag-quota-section' });
+        const liveGroups = Array.isArray(lastState.quotaSummary?.groups) ? lastState.quotaSummary.groups : [];
+        const activeGroup = pickActiveQuotaGroup(liveGroups, detectActiveModelLabel(), selectedQuotaGroupId);
 
-      if (mods.quotaPulse && lastState.quota) {
-        const q = lastState.quota;
-        const obs = q.observed || {};
-        const loc = q.localEstimate || {};
-        const lim = q.limits || {};
-        const turns5h = Number(loc.turns5h) || 0;
-        const soft5h = Number(lim.softTurns5h) || 60;
-        const turns7d = Number(loc.turns7d) || 0;
-        const soft7d = Number(lim.softTurns7d) || 350;
+        if (activeGroup && (activeGroup.fiveHour || activeGroup.weekly)) {
+          const b5 = activeGroup.fiveHour;
+          const bw = activeGroup.weekly;
+          const minPct = Math.min(
+            b5 ? Number(b5.remainingPct ?? 100) : 100,
+            bw ? Number(bw.remainingPct ?? 100) : 100
+          );
+          const paceTone = remainingTone(minPct);
+          const paceLabel =
+            paceTone === 'danger'
+              ? sagStr.cardQuotaLow || 'Low Quota'
+              : paceTone === 'warn'
+                ? sagStr.cardQuotaTight || 'Running Low'
+                : sagStr.cardQuotaHealthy || 'Healthy';
 
-        const obs5hPct =
-          obs.bucket === '5h' || obs.bucket === 'unknown'
-            ? (typeof obs.observedPct === 'number' && Number.isFinite(obs.observedPct) ? Math.round(obs.observedPct) : null)
-            : null;
-        const obs7dPct =
-          obs.bucket === 'weekly'
-            ? (typeof obs.observedPct === 'number' && Number.isFinite(obs.observedPct) ? Math.round(obs.observedPct) : null)
-            : null;
+          const qHead = mk('div', 'ag-sag-qhead');
+          const qTitle = mk('span', 'ag-sag-qtitle');
+          qTitle.appendChild(mk('span', undefined, activeGroup.shortName || activeGroup.displayName));
+          qTitle.appendChild(mk('span', 'ag-sag-qpace', paceLabel, { 'data-tone': paceTone }));
+          qHead.appendChild(qTitle);
 
-        const pct5h = obs.rateLimited && obs.bucket !== 'weekly'
-          ? 100
-          : obs5hPct !== null
-            ? obs5hPct
-            : Math.min(100, Math.round((turns5h / Math.max(1, soft5h)) * 100));
-        const pct7d = obs.rateLimited && obs.bucket === 'weekly'
-          ? 100
-          : obs7dPct !== null
-            ? obs7dPct
-            : Math.min(100, Math.round((turns7d / Math.max(1, soft7d)) * 100));
+          if (liveGroups.length > 1) {
+            const tabs = mk('div', 'ag-sag-qtabs');
+            for (const g of liveGroups) {
+              const isAct = g.id === activeGroup.id;
+              tabs.appendChild(
+                mkBtn(
+                  'ag-sag-qtab',
+                  g.shortName || g.displayName,
+                  { 'data-ag-sag-qgroup': g.id, 'aria-pressed': String(isAct) },
+                  () => {
+                    selectedQuotaGroupId = g.id;
+                    renderStandaloneCard();
+                  }
+                )
+              );
+            }
+            qHead.appendChild(tabs);
+          }
+          qSec.appendChild(qHead);
 
-        const resetStr = obs.remainingSec ? formatResetCompact(obs.remainingSec) : '';
-        const resetHint = resetStr ? formatTpl(sagStr.cardResetIn || 'Resets in {t}', { t: resetStr }) : '';
-        const sub5h = obs.bucket !== 'weekly' && resetHint ? resetHint : `${turns5h}/${soft5h} ${turnsUnit}`;
-        const sub7d = obs.bucket === 'weekly' && resetHint ? resetHint : `${turns7d}/${soft7d} ${turnsUnit}`;
-
-        appendMeterRow(meters, {
-          label: sagStr.cardQuota5h || strings.cardQuotaLabel || '5h Quota',
-          pct: pct5h,
-          sub: sub5h,
-          tone: ratioTone(pct5h, Boolean(obs.rateLimited && obs.bucket !== 'weekly')),
-          testAttr: 'quota',
-        });
-        appendMeterRow(meters, {
-          label: sagStr.cardQuota7d || 'Weekly Quota',
-          pct: pct7d,
-          sub: sub7d,
-          tone: ratioTone(pct7d, Boolean(obs.rateLimited && obs.bucket === 'weekly')),
-          testAttr: 'quota-7d',
-        });
+          const rows = mk('div', 'ag-sag-qrows');
+          const addQuotaRow = (label, bucket, attr) => {
+            if (!bucket) return;
+            const remPct = Math.max(
+              0,
+              Math.min(100, Math.round(Number(bucket.remainingPct ?? (Number(bucket.remainingFraction) * 100)) || 0))
+            );
+            const row = mk('div', 'ag-sag-qrow', undefined, { 'data-ag-sag-card-metric': attr });
+            row.appendChild(mk('span', 'ag-sag-qlbl', label));
+            const track = mk('div', 'ag-sag-quota-bar ag-sag-meter-track');
+            const fill = mk('span', 'ag-sag-quota-bar-fill', undefined, { 'data-tone': remainingTone(remPct) });
+            if (fill.style) fill.style.width = `${remPct}%`;
+            track.appendChild(fill);
+            row.appendChild(track);
+            const eta = bucket.resetInMs > 0 ? formatResetDurationMs(bucket.resetInMs) : '';
+            row.appendChild(mk('span', 'ag-sag-qval', eta ? `${remPct}% · ${eta}` : `${remPct}%`));
+            rows.appendChild(row);
+          };
+          addQuotaRow(sagStr.cardQuota5h || '5h Win', b5, 'quota');
+          addQuotaRow(sagStr.cardQuota7d || 'Weekly', bw, 'quota-7d');
+          qSec.appendChild(rows);
+        } else {
+          const obs = lastState.quota?.observed || null;
+          if (obs && (obs.rateLimited || (typeof obs.observedPct === 'number' && Number.isFinite(obs.observedPct)))) {
+            const usedObs = obs.rateLimited ? 100 : Math.max(0, Math.min(100, Math.round(obs.observedPct)));
+            const remObs = Math.max(0, 100 - usedObs);
+            const rows = mk('div', 'ag-sag-qrows');
+            const row = mk('div', 'ag-sag-qrow', undefined, { 'data-ag-sag-card-metric': 'quota' });
+            row.appendChild(mk('span', 'ag-sag-qlbl', obs.bucket === 'weekly' ? (sagStr.cardQuota7d || 'Weekly') : (sagStr.cardQuota5h || '5h Win')));
+            const track = mk('div', 'ag-sag-quota-bar ag-sag-meter-track');
+            const fill = mk('span', 'ag-sag-quota-bar-fill', undefined, { 'data-tone': remainingTone(remObs) });
+            if (fill.style) fill.style.width = `${remObs}%`;
+            track.appendChild(fill);
+            row.appendChild(track);
+            const eta = obs.remainingSec ? formatResetCompact(obs.remainingSec) : '';
+            row.appendChild(mk('span', 'ag-sag-qval', eta ? `${remObs}% · ${eta}` : `${remObs}%`));
+            rows.appendChild(row);
+            qSec.appendChild(rows);
+          } else {
+            qSec.appendChild(mk('div', 'ag-sag-qnote', sagStr.cardQuotaOffline || 'Waiting for local quota service'));
+          }
+        }
+        cardEl.appendChild(qSec);
       }
 
+      // 3. Compact current context bar
+      const meters = mk('div', 'ag-sag-meters');
       if (mods.compactGuard) {
         const autoNote = cfg.compactThreshold === 'off' ? '' : formatTpl(sagStr.cardAutoAt || 'Auto at {th}', { th: thText });
         const ctxSub = [tokText, cfg.compactThreshold === 'off' ? '' : thText].filter(Boolean).join(' · ');
@@ -633,7 +748,6 @@
           title: [tokText, autoNote].filter(Boolean).join(' · '),
         });
       }
-
       if (meters.children.length > 0) cardEl.appendChild(meters);
 
       // 3. Quiet conditional chips: ONLY render non-zero / active items (zero clutter when idle)
@@ -730,7 +844,7 @@
         cardEl.appendChild(details);
       }
 
-      // 5. Crisp single-row footer with concise, natural labels
+      // 5. Crisp single-row footer (high-frequency actions only; low-frequency Export lives in Settings -> Conversation)
       const foot = mk('div', 'ag-sg-card-foot');
       const addAct = (cls, text, act, fn, title) => {
         const b = mkBtn(cls, text, { 'data-ag-sg-card-act': act }, () => { close(); fn(); });
@@ -739,7 +853,6 @@
       };
       if (typeof options.onCompactNow === 'function') addAct('ag-sg-btn', sagStr.cardBtnCompact || strings.btnCompactNow, 'compact-now', options.onCompactNow);
       if (typeof options.onCleanRestart === 'function') addAct('ag-sg-btn ag-sg-btn-primary', sagStr.cardBtnRestart || strings.btnClearKeep, 'clean-restart', () => options.onCleanRestart({ mode: 'keep' }), strings.clearKeepTip);
-      if (mods.precompactExport !== false && typeof options.onExportSession === 'function') addAct('ag-sg-btn', sagStr.cardExportMdBtn || 'Export', 'export-md', options.onExportSession);
       if (typeof options.onOpenSettings === 'function') addAct('ag-sg-btn', sagStr.cardBtnSettings || 'Settings', 'open-settings', () => options.onOpenSettings('overview'));
       if (foot.children.length > 0) cardEl.appendChild(foot);
     }
@@ -847,6 +960,7 @@
     function open() {
       if (destroyed) return;
       cardOpen = true;
+      try { options.onRequestQuotaRefresh?.(); } catch {}
       sync();
     }
 

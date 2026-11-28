@@ -997,7 +997,7 @@ function packStaticCssConstInCode(code, constName, { useDict = false, runtimeCss
     const compressed = compressWithFreeSymbols(min, candidates, {
       minOccurrences: 2,
       entryOverhead: 3,
-      bpePasses: 1,
+      bpePasses: 3,
       skipBpeToken: (tok) => /[+()%01]/.test(tok) || /calc/i.test(tok),
     });
     if (compressed) {
@@ -1072,7 +1072,7 @@ function packFrozenArrayConst(code, constName) {
     ],
     { minGain: 6, maxCount: 384 }
   );
-  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 1 });
+  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 2 });
   if (!compressed) return code;
 
   const dictSrc = encodeDictLiteral(compressed.d);
@@ -1141,7 +1141,7 @@ function packFrozenObjectConst(code, constName, runtimeObj = null) {
     ],
     { minGain: 4, maxCount: 384 }
   );
-  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 1 });
+  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 2, entryOverhead: 3, bpePasses: 2 });
   let replacement;
   if (compressed) {
     const dictSrc = encodeDictLiteral(compressed.d);

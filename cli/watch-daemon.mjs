@@ -52,7 +52,132 @@ export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
 const MAX_EXECUTION_CONTEXTS = 1024;
 const HOST_BRIDGE_HANDSHAKE_TIMEOUT_MS = 8000;
 const STORAGE_AUDIT_CACHE_TTL_MS = 15_000;
+const QUOTA_SUMMARY_CACHE_TTL_MS = 60_000;
 const MAX_ZOMBIE_BRIDGE_BIND_FAILURES = 3;
+
+function isLoopbackHostAddress(rawAddr) {
+  const s = String(rawAddr || '').trim();
+  if (!s) return false;
+  try {
+    const u = new URL(/^https?:\/\//i.test(s) ? s : `http://${s}`);
+    const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function classifyQuotaGroup(rawGroup, idx = 0) {
+  const name = String(rawGroup?.displayName || rawGroup?.name || rawGroup?.id || '').trim();
+  const buckets = Array.isArray(rawGroup?.buckets) ? rawGroup.buckets : [];
+  const joined = `${name} ${buckets.map((b) => String(b?.bucketId || '')).join(' ')}`;
+  if (/argon|wtu/i.test(joined)) return { id: 'argon', shortName: 'Argon', displayName: name || 'Gemini (Argon)' };
+  if (/claude|anthropic|sonnet|opus|haiku|gpt|openai|3p/i.test(joined)) {
+    return { id: 'claude', shortName: 'Claude / GPT', displayName: name || 'Claude / GPT' };
+  }
+  if (/gemini|google/i.test(joined)) return { id: 'gemini', shortName: 'Gemini', displayName: name || 'Gemini' };
+  return { id: `group_${idx + 1}`, shortName: (name || `Group ${idx + 1}`).slice(0, 14), displayName: name || `Group ${idx + 1}` };
+}
+
+export function normalizeLocalQuotaSummary(raw, nowMs = Date.now()) {
+  const rawGroups = Array.isArray(raw?.response?.groups)
+    ? raw.response.groups
+    : Array.isArray(raw?.groups)
+      ? raw.groups
+      : [];
+  const groups = [];
+  for (let i = 0; i < rawGroups.length; i += 1) {
+    const g = rawGroups[i];
+    if (!g || typeof g !== 'object') continue;
+    const meta = classifyQuotaGroup(g, i);
+    const buckets = Array.isArray(g.buckets) ? g.buckets : [];
+    const normBucket = (b) => {
+      if (!b || typeof b !== 'object') return null;
+      const frac = Number(b.remainingFraction ?? b.remaining);
+      if (!Number.isFinite(frac) || frac < 0 || frac > 1) return null;
+      const resetAt = typeof b.resetTime === 'string' && b.resetTime.trim() ? b.resetTime.trim() : null;
+      const parsedReset = resetAt ? Date.parse(resetAt) : NaN;
+      const resetInMs = Number.isFinite(parsedReset) ? Math.max(0, parsedReset - nowMs) : 0;
+      return {
+        remainingFraction: Math.round(frac * 10000) / 10000,
+        remainingPct: Math.max(0, Math.min(100, Math.round(frac * 100))),
+        resetAt,
+        resetInMs,
+      };
+    };
+    let fiveHour = null;
+    let weekly = null;
+    for (const b of buckets) {
+      const winKey = String(b?.window || b?.bucketId || '').toLowerCase();
+      if (winKey.includes('5h') || winKey.includes('five')) fiveHour = normBucket(b);
+      else if (winKey.includes('week') || winKey.includes('7d')) weekly = normBucket(b);
+    }
+    if (fiveHour || weekly) {
+      groups.push({
+        id: meta.id,
+        shortName: meta.shortName,
+        displayName: meta.displayName,
+        fiveHour,
+        weekly,
+      });
+    }
+  }
+  return {
+    available: groups.length > 0,
+    fetchedAt: nowMs,
+    groups,
+  };
+}
+
+export async function fetchLocalQuotaSummary({
+  lsAddress = process.env.ANTIGRAVITY_LS_ADDRESS || '',
+  csrfToken = process.env.ANTIGRAVITY_CSRF_TOKEN || '',
+  fetchFn = globalThis.fetch,
+  nowFn = () => Date.now(),
+  timeoutMs = 3000,
+} = {}) {
+  const nowMs = nowFn();
+  const addr = String(lsAddress || '').trim();
+  const token = String(csrfToken || '').trim();
+  if (!addr || !token) {
+    return { available: false, reason: 'unavailable', fetchedAt: nowMs, groups: [] };
+  }
+  if (!isLoopbackHostAddress(addr)) {
+    return { available: false, reason: 'non-loopback', fetchedAt: nowMs, groups: [] };
+  }
+  if (typeof fetchFn !== 'function') {
+    return { available: false, reason: 'no-fetch', fetchedAt: nowMs, groups: [] };
+  }
+  const baseUrl = /^https?:\/\//i.test(addr) ? addr.replace(/\/+$/, '') : `http://${addr}`;
+  const url = `${baseUrl}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), Math.max(500, Math.min(8000, Number(timeoutMs) || 3000)));
+  timer?.unref?.();
+  try {
+    const res = await fetchFn(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-codeium-csrf-token': token,
+      },
+      body: '{}',
+      signal: ac.signal,
+    });
+    if (!res || !res.ok) {
+      return { available: false, reason: `http-${res?.status || 0}`, fetchedAt: nowMs, groups: [] };
+    }
+    const text = await res.text();
+    if (!text || text.length > 256 * 1024) {
+      return { available: false, reason: 'oversize', fetchedAt: nowMs, groups: [] };
+    }
+    const parsed = JSON.parse(text);
+    return normalizeLocalQuotaSummary(parsed, nowMs);
+  } catch {
+    return { available: false, reason: 'fetch-failed', fetchedAt: nowMs, groups: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const WATCH_DAEMON_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = path.resolve(WATCH_DAEMON_DIR, '..');
 const CORE_SOURCES_DIR = path.join(DEFAULT_REPO_ROOT, 'packages', 'core');
@@ -705,6 +830,11 @@ export class SagWatchDaemon {
     this.translatorService = options.translatorService || new TranslatorService(options.translatorOpts || {});
     this._defaultInjectCache = new Map();
     this._storageAuditCache = new Map();
+    this._quotaSummaryCache = null;
+    this.fetchQuotaSummary =
+      typeof options.fetchQuotaSummary === 'function'
+        ? options.fetchQuotaSummary
+        : () => fetchLocalQuotaSummary({ nowFn: this.now });
     this._novConfigStatCache = null;
     this.extPacksRepoRoot = options.extPacksRepoRoot || undefined;
     this.buildInject =
@@ -967,6 +1097,28 @@ export class SagWatchDaemon {
           } catch {
             return { reqId, ok: false, error: 'Storage audit failed' };
           }
+        }
+        if (parsed && typeof parsed === 'object' && parsed.type === 'sag:quota_summary') {
+          const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
+          const nowMs = this.now();
+          if (this._quotaSummaryCache && this._quotaSummaryCache.expiresAt > nowMs) {
+            return { reqId, ok: true, data: this._quotaSummaryCache.data };
+          }
+          return Promise.resolve(this.fetchQuotaSummary())
+            .then((summary) => {
+              const data =
+                summary && typeof summary === 'object'
+                  ? summary
+                  : { available: false, fetchedAt: this.now(), groups: [] };
+              const ttl = data.available ? QUOTA_SUMMARY_CACHE_TTL_MS : 15000;
+              this._quotaSummaryCache = { expiresAt: this.now() + ttl, data };
+              return { reqId, ok: true, data };
+            })
+            .catch(() => ({
+              reqId,
+              ok: true,
+              data: { available: false, reason: 'fetch-failed', fetchedAt: this.now(), groups: [] },
+            }));
         }
         if (parsed && typeof parsed === 'object' && parsed.type === 'sag:telemetry_snapshot') {
           const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
