@@ -625,7 +625,12 @@ test('sag-cli routes launch --dry-run --json, keepalive --once --json, and help 
     });
     assert.equal(cliRes.exitCode, 0);
     const parsed = JSON.parse(lines.join('\n'));
-    assert.equal(parsed.port, 9222);
+    if (parsed.action === 'already-running-with-cdp') {
+      assert.ok(Number.isInteger(parsed.port) && parsed.port > 0, 'already-running-with-cdp must report active CDP port');
+      assert.equal(parsed.launchSpec?.port, 9222);
+    } else {
+      assert.equal(parsed.port, 9222);
+    }
     assert.equal(typeof parsed.action, 'string');
     assert.equal(parsed.executed, false);
 

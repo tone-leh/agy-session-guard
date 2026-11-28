@@ -690,7 +690,7 @@
       if (typeof options.onCompactNow === 'function') addAct('ag-sg-btn', strings.btnCompactNow, 'compact-now', options.onCompactNow);
       if (typeof options.onCleanRestart === 'function') addAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clean-restart', () => options.onCleanRestart({ mode: 'keep' }), strings.clearKeepTip);
       if (mods.precompactExport !== false && typeof options.onExportSession === 'function') addAct('ag-sg-btn', sagStr.cardExportMdBtn || 'Export MD', 'export-md', options.onExportSession);
-      if (typeof options.onOpenShortcuts === 'function') addAct('ag-sg-btn', '⌨', 'open-shortcuts', options.onOpenShortcuts);
+      if (typeof options.onOpenShortcuts === 'function') addAct('ag-sg-btn', '⌨', 'open-shortcuts', options.onOpenShortcuts, sagStr.shortcutsTitle || 'Shortcuts');
       if (typeof options.onOpenSettings === 'function' && strings.cardOpenSettingsBtn) addAct('ag-sg-btn', strings.cardOpenSettingsBtn, 'open-settings', () => options.onOpenSettings('overview'));
       if (foot.children.length > 0) cardEl.appendChild(foot);
     }

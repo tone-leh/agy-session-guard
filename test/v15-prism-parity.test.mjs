@@ -841,4 +841,9 @@ test('8. v1.5 Migrated local config auto-loading: whitelist filtering, symlink r
       assert.equal(readLocalSagConfig({ explicitPath: symPath }), null, 'Symlink config must be rejected fail-closed');
     }
   });
+
+  // StatusPill popover footer must wrap cleanly instead of clipping leftmost action buttons
+  const stylesMod = require('../packages/core/styles.js');
+  assert.match(stylesMod.CORE_CSS, /\.ag-sg-card-foot\{[^}]*flex-wrap:\s*wrap/i);
+  assert.match(stylesMod.CORE_CSS, /\.ag-sg-status-card\{[^}]*width:min\(336px/i);
 });
